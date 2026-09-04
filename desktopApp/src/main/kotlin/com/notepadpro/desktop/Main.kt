@@ -8,7 +8,7 @@ import androidx.compose.ui.window.rememberWindowState
 import com.notepadpro.shared.AppCore
 import com.notepadpro.shared.data.settings.SettingsRepository
 import com.notepadpro.shared.platform.appCoreScope
-import com.notepadpro.shared.platform.createSettings
+import com.notepadpro.shared.data.settings.createSettings
 import com.notepadpro.shared.ui.NotePadProApp
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json

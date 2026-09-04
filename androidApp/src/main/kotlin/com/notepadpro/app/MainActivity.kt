@@ -20,7 +20,7 @@ class MainActivity : ComponentActivity() {
         AppCore(
             scope = com.notepadpro.shared.platform.appCoreScope(),
             settings = SettingsRepository(
-                settings = com.notepadpro.shared.platform.createSettings(),
+                settings = com.notepadpro.shared.data.settings.createSettings(),
                 json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
             )
         )
