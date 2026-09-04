@@ -13,17 +13,17 @@ your device.
 
 ## Download
 
-Built automatically by GitHub Actions on every push. Latest artifacts live on the
-[`release-binaries`](https://github.com/ab2024103-cmd/Note-/tree/release-binaries) branch:
+Built automatically by GitHub Actions on every push and published to the GitHub
+Release **[v1.0.0](https://github.com/ab2024103-cmd/Note-/releases/tag/v1.0.0)**:
 
 | File | Link | About |
 | ---- | ---- | ----- |
-| Windows installer (.exe) | [NotePadPro-1.0.0.exe](https://github.com/ab2024103-cmd/Note-/raw/refs/heads/release-binaries/NotePadPro-1.0.0.exe) | Per-user native installer (EXE) |
-| Windows installer (.msi) | [NotePadPro-1.0.0.msi](https://github.com/ab2024103-cmd/Note-/raw/refs/heads/release-binaries/NotePadPro-1.0.0.msi) | Per-user MSI installer |
-| Android APK (release) | [androidApp-release.apk](https://github.com/ab2024103-cmd/Note-/raw/refs/heads/release-binaries/androidApp-release.apk) | Minified/shrunk, signed with the debug key so it installs directly |
-| Android APK (debug) | [androidApp-debug.apk](https://github.com/ab2024103-cmd/Note-/raw/refs/heads/release-binaries/androidApp-debug.apk) | Debug build |
+| Windows installer (.exe) | [NotePadPro-1.0.0.exe](https://github.com/ab2024103-cmd/Note-/releases/download/v1.0.0/NotePadPro-1.0.0.exe) | Per-user native installer (EXE) |
+| Windows installer (.msi) | [NotePadPro-1.0.0.msi](https://github.com/ab2024103-cmd/Note-/releases/download/v1.0.0/NotePadPro-1.0.0.msi) | Per-user MSI installer |
+| Android APK (release) | [androidApp-release.apk](https://github.com/ab2024103-cmd/Note-/releases/download/v1.0.0/androidApp-release.apk) | Minified/shrunk, signed with the debug key so it installs directly |
+| Android APK (debug) | [androidApp-debug.apk](https://github.com/ab2024103-cmd/Note-/releases/download/v1.0.0/androidApp-debug.apk) | Debug build |
 
-Checksums: [CHECKSUMS.md5](https://github.com/ab2024103-cmd/Note-/blob/release-binaries/CHECKSUMS.md5)
+Checksums: [CHECKSUMS.md5](https://github.com/ab2024103-cmd/Note-/releases/download/v1.0.0/CHECKSUMS.md5)
 
 > The release APK is signed with the standard debug keystore (no secrets needed on a
 > public build server), so it can be installed on any device out of the box. For store
@@ -67,7 +67,7 @@ Prerequisites: JDK 17, Android SDK 34 (for the APK).
 ```
 
 GitHub Actions (`.github/workflows/build.yml`) builds both targets on every push and
-publishes the artifacts to the `release-binaries` branch. CI logs of failed runs are
+publishes the artifacts as GitHub Release v1.0.0. CI logs of failed runs are
 published to the `ci-logs` branch.
 
 ## Repository layout
