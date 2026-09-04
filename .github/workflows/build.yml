@@ -24,13 +24,22 @@ jobs:
           distribution: temurin
           java-version: 17
           cache: gradle
-      - name: Accept Android SDK licenses
-        run: |
-          yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "platforms;android-34" "build-tools;34.0.0" > /dev/null 2>&1 || true
       - name: Build release APK
-        run: ./gradlew --no-daemon --stacktrace :androidApp:assembleRelease :androidApp:assembleDebug
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --console=plain --stacktrace \
+            :androidApp:assembleRelease :androidApp:assembleDebug \
+            2>&1 | tee "$RUNNER_TEMP/gradle-android.log"
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: log-android
+          path: ${{ runner.temp }}/gradle-android.log
+          if-no-files-found: warn
       - name: Upload APK artifacts
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: apk
@@ -50,42 +59,36 @@ jobs:
           distribution: temurin
           java-version: 17
           cache: gradle
-      - name: Provision Android SDK for Gradle configuration
+      - name: Compile shared + desktop
         shell: pwsh
         run: |
-          if ($env:ANDROID_HOME -and (Test-Path "$env:ANDROID_HOME\platforms")) {
-            Write-Host "Android SDK already present: $env:ANDROID_HOME"
-          } else {
-            New-Item -ItemType Directory -Force -Path C:\Android | Out-Null
-            Invoke-WebRequest -Uri "https://dl.google.com/android/repository/commandlinetools-win-11076708_latest.zip" -OutFile C:\Android\cmdtools.zip
-            Expand-Archive -Path C:\Android\cmdtools.zip -DestinationPath C:\Android\cmdline-tools
-            Move-Item -Path C:\Android\cmdline-tools\cmdline-tools -Destination C:\Android\cmdline-tools\latest
-            "ANDROID_HOME=C:\Android" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8
-            "ANDROID_SDK_ROOT=C:\Android" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8
-          }
-      - name: Install SDK platform + licenses
-        shell: pwsh
-        run: |
-          $sdk = Join-Path $env:ANDROID_HOME "cmdline-tools\latest\bin\sdkmanager.bat"
-          if (Test-Path $sdk) {
-            1..10 | ForEach-Object { "y" } | & $sdk --licenses | Out-Null
-            & $sdk "platforms;android-34" "build-tools;34.0.0" | Out-Null
-          }
+          ./gradlew --no-daemon --console=plain --stacktrace :desktopApp:compileKotlin `
+            2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\gradle-desktop.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Install WiX Toolset (for MSI)
+        if: success()
         shell: pwsh
         run: |
           choco install wixtoolset -y --no-progress | Out-Null
-          Write-Host "WiX installed"
-      - name: Compile shared + desktop
-        run: ./gradlew --no-daemon --stacktrace :desktopApp:compileKotlin
       - name: Package MSI + EXE installers
-        run: |
-          ./gradlew --no-daemon --stacktrace :desktopApp:packageMsi :desktopApp:packageExe
-      - name: List installer outputs
+        if: success()
         shell: pwsh
         run: |
-          Get-ChildItem -Recurse desktopApp/build/compose/binaries | Select-Object FullName, Length
+          ./gradlew --no-daemon --console=plain --stacktrace `
+            :desktopApp:packageMsi :desktopApp:packageExe `
+            2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\gradle-desktop-package.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: log-desktop
+          path: |
+            ${{ runner.temp }}/gradle-desktop.log
+            ${{ runner.temp }}/gradle-desktop-package.log
+          if-no-files-found: warn
       - name: Upload installer artifacts
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: windows-installers
@@ -94,23 +97,18 @@ jobs:
             desktopApp/build/compose/binaries/main/exe/*.exe
           if-no-files-found: error
 
-  deliver:
-    name: Publish binaries to the repo
+  publish-binaries:
+    name: Publish binaries to release-binaries branch
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     needs: [android, desktop-windows]
-    if: always()
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: false
-      - name: Inspect artifacts
-        run: find artifacts -type f | head -50
-      - name: Push binaries to release-binaries branch
+      - name: Commit binaries to release-binaries branch
         shell: bash
         run: |
           set -euo pipefail
@@ -119,18 +117,38 @@ jobs:
           find artifacts -type f \( -name "*.apk" -o -name "*.msi" -o -name "*.exe" \) -exec cp {} bins/ \;
           (cd bins && md5sum * > CHECKSUMS.md5)
           echo "Built from commit $SHA on $(date -u)" > bins/BUILD_INFO.txt
-          ls -la bins
-          # Remember the branch we were building on.
-          ORIG_BRANCH=$(git symbolic-ref --short HEAD)
           git config user.name "notepadpro-ci"
           git config user.email "ci@notepadpro.local"
-          # Replace release-binaries with an orphan commit containing just the binaries.
-          git checkout --orphan release-binaries 2>/dev/null || git checkout release-binaries 2>/dev/null
-          git reset -q --hard 2>/dev/null || true
-          git rm -rq --ignore-unmatch . 2>/dev/null || true
-          cp -v bins/* .
-          git add -f .
-          git commit -m "Build artifacts for $SHA [skip ci]" --allow-empty
+          git checkout --orphan release-binaries
+          git rm -rfq --ignore-unmatch . || true
+          cp bins/* .
+          git add -A
+          git commit -m "Binaries for $SHA [skip ci]"
           git push origin HEAD:release-binaries --force
-          # Return to the branch this workflow was triggered on (best effort).
-          git checkout -q -f "$ORIG_BRANCH" 2>/dev/null || true
+
+  publish-logs:
+    name: Publish CI logs to ci-logs branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [android, desktop-windows]
+    if: failure()
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: logs
+          merge-multiple: false
+      - name: Commit logs to ci-logs branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHA=$(git rev-parse HEAD)
+          git config user.name "notepadpro-ci"
+          git config user.email "ci@notepadpro.local"
+          git checkout --orphan ci-logs
+          git rm -rfq --ignore-unmatch . || true
+          find logs -type f \( -name "*.log" \) -exec cp {} . \;
+          ls -la
+          git add -A
+          git commit -m "CI logs for $SHA [skip ci]" --allow-empty
+          git push origin HEAD:ci-logs --force
