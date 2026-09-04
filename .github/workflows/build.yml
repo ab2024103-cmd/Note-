@@ -123,6 +123,7 @@ jobs:
           git rm -rfq --ignore-unmatch . || true
           rm -rf artifacts
           cp bins/* .
+          rm -rf bins
           git add -A
           git commit -m "Binaries for $SHA [skip ci]"
           git push origin HEAD:release-binaries --force
