@@ -27,9 +27,10 @@ kotlin {
             implementation(compose.foundation)
             implementation(compose.material)
             implementation(compose.ui)
-            implementation(libs.kotlinx.coroutines.core)
-            implementation(libs.kotlinx.serialization.json)
-            implementation(libs.multiplatform.settings)
+            // Exposed to thin entry-point modules that construct AppCore.
+            api(libs.kotlinx.coroutines.core)
+            api(libs.kotlinx.serialization.json)
+            api(libs.multiplatform.settings)
             implementation(libs.sqldelight.runtime)
         }
         commonTest.dependencies {

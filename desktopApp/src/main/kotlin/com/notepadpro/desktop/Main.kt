@@ -13,6 +13,7 @@ import com.notepadpro.shared.ui.NotePadProApp
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import java.awt.Dimension
+import kotlin.math.roundToInt
 
 /**
  * Windows/Linux/macOS entry point.
@@ -35,8 +36,8 @@ fun main() = application {
     Window(
         onCloseRequest = {
             windowState.size?.let {
-                settings.windowWidth = it.width
-                settings.windowHeight = it.height
+                settings.windowWidth = it.width.value.roundToInt()
+                settings.windowHeight = it.height.value.roundToInt()
             }
             // Flush debounced autosaves + persist the tab session.
             runBlocking { core.flushAll() }
