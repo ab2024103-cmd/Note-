@@ -121,7 +121,7 @@ jobs:
           git config user.email "ci@notepadpro.local"
           git checkout --orphan release-binaries
           git rm -rfq --ignore-unmatch . || true
-          rm -rf artifacts bins release-binaries
+          rm -rf artifacts
           cp bins/* .
           git add -A
           git commit -m "Binaries for $SHA [skip ci]"
