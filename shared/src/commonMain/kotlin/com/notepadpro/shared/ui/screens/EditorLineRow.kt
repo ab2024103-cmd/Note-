@@ -158,15 +158,11 @@ internal fun EditorLineRow(
      * so plain typing (which updates tfv first) never jumps the caret.
      */
     LaunchedEffect(line.plainText, line.spans, line.checked, findRanges, findColor) {
-        val expected = buildLineAnnotation(line, findRanges, findColor)
-        if (tfv.text != expected) {
-            val caret = caretToApply
-            tfv = TextFieldValue(
-                text = expected,
-                selection = TextRange(
-                    (caret?.min ?: tfv.selection.min).coerceIn(0, lineText.length)
-                )
-            )
+        val expected: AnnotatedString = buildLineAnnotation(line, findRanges, findColor)
+        val current: AnnotatedString = tfv.text
+        if (current != expected) {
+            val selMin = (caretToApply?.min ?: tfv.selection.min).coerceIn(0, lineText.length)
+            tfv = TextFieldValue(expected, TextRange(selMin))
         }
     }
 

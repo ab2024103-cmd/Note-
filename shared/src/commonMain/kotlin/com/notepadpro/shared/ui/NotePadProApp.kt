@@ -52,6 +52,7 @@ import com.notepadpro.shared.platform.PlatformKeyScope
 import com.notepadpro.shared.ui.screens.EditorScreen
 import com.notepadpro.shared.ui.screens.SidebarPane
 import com.notepadpro.shared.ui.theme.NotePadProTheme
+import kotlinx.coroutines.launch
 
 /**
  * Root composable: resolves the theme, builds the app chrome (tabs, sidebar,
@@ -273,7 +274,7 @@ private fun TabChip(tab: Tab, active: Boolean, onActivate: () -> Unit, onClose: 
 // ---------------------------------------------------------------------------
 
 private fun dispatchAppShortcut(core: AppCore, ev: PlatformKeyEvent): Boolean {
-    if (!ev.isDownEvent) return false
+    if (!ev.isDown) return false
     val session = core.activeSession ?: return false
     val ui = core.ui.value
 

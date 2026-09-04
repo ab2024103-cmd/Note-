@@ -1,6 +1,7 @@
 package com.notepadpro.shared.data.settings
 
 import com.russhwolf.settings.Settings
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 enum class ThemeMode { LIGHT, DARK, SYSTEM }

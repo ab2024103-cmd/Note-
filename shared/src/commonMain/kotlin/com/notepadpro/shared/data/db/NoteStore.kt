@@ -8,6 +8,7 @@ import com.notepadpro.shared.domain.model.TextCodec
 import com.notepadpro.shared.platform.AppDispatchers
 import com.notepadpro.shared.platform.createDatabaseDriver
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 /**
@@ -16,20 +17,47 @@ import kotlinx.serialization.json.Json
  * List<EditorLine>; no HTML is ever stored.
  */
 class NoteStore private constructor(
-    private val queries: NoteDatabase.NoteQueries,
+    private val db: NoteDatabase,
     private val json: Json
 ) {
 
+    /** Column mapper for `SELECT * FROM note` rows (see Note.sq). */
+    private val toNoteRow: (Long, String, String, Long, String?, String, Long, Long) -> NoteRow =
+        { id, title, linesJson, isPinned, _sourcePath, _lineEnding, createdAt, modifiedAt ->
+            val titleText = title.ifBlank { "Untitled" }
+            NoteRow(
+                id = id,
+                title = titleText,
+                preview = previewFromJson(linesJson, titleText),
+                isPinned = isPinned == 1L,
+                modifiedAt = modifiedAt,
+                createdAt = createdAt
+            )
+        }
+
     suspend fun getAll(): List<NoteRow> = withContext(AppDispatchers.io) {
-        queries.selectAll().executeAsList().map { it.toRow() }
+        db.noteQueries.selectAll(toNoteRow).executeAsList()
     }
 
     suspend fun search(query: String): List<NoteRow> = withContext(AppDispatchers.io) {
-        queries.searchByTitleOrContent(query.trim()).executeAsList().map { it.toRow() }
+        db.noteQueries.searchByTitleOrContent(query.trim(), toNoteRow).executeAsList()
     }
 
     suspend fun getDocument(id: Long): NoteDocument? = withContext(AppDispatchers.io) {
-        queries.selectById(id).executeAsOneOrNull()?.toDocument(json)
+        db.noteQueries.selectById(id) { noteId, title, linesJson, isPinned, sourcePath, lineEnding, createdAt, modifiedAt ->
+            NoteDocument(
+                id = noteId,
+                title = title.ifBlank { "Untitled" },
+                lines = runCatching {
+                    json.decodeFromString<List<EditorLine>>(linesJson)
+                }.getOrDefault(emptyList()),
+                isPinned = isPinned == 1L,
+                sourcePath = sourcePath,
+                lineEnding = runCatching { LineEnding.valueOf(lineEnding) }.getOrDefault(LineEnding.LF),
+                createdAt = createdAt,
+                modifiedAt = modifiedAt
+            )
+        }.executeAsOneOrNull()
     }
 
     /**
@@ -42,7 +70,7 @@ class NoteStore private constructor(
         val linesJson = json.encodeToString<List<EditorLine>>(doc.lines)
         val id = doc.id
         if (id == null) {
-            queries.insertNote(
+            db.noteQueries.insertNote(
                 title = doc.title.ifBlank { TextCodec.titleFromLines(doc.lines) },
                 lines_json = linesJson,
                 is_pinned = if (doc.isPinned) 1L else 0L,
@@ -51,9 +79,9 @@ class NoteStore private constructor(
                 created_at = if (doc.createdAt == 0L) now else doc.createdAt,
                 modified_at = now
             )
-            queries.lastInsertRowId().executeAsOne()
+            db.noteQueries.lastInsertRowId().executeAsOne()
         } else {
-            queries.updateNote(
+            db.noteQueries.updateNote(
                 title = doc.title.ifBlank { TextCodec.titleFromLines(doc.lines) },
                 lines_json = linesJson,
                 is_pinned = if (doc.isPinned) 1L else 0L,
@@ -67,49 +95,19 @@ class NoteStore private constructor(
     }
 
     suspend fun deleteNote(id: Long) = withContext(AppDispatchers.io) {
-        queries.deleteNote(id)
+        db.noteQueries.deleteNote(id)
     }
 
     suspend fun setPinned(id: Long, pinned: Boolean) = withContext(AppDispatchers.io) {
-        queries.setPinned(if (pinned) 1L else 0L, id)
+        db.noteQueries.setPinned(if (pinned) 1L else 0L, id)
     }
 
     companion object {
         fun create(json: Json = Json { ignoreUnknownKeys = true }): NoteStore {
             val driver = createDatabaseDriver()
-            val db = NoteDatabase(driver)
-            return NoteStore(db.noteQueries, json)
+            return NoteStore(NoteDatabase(driver), json)
         }
     }
-}
-
-private fun Note.toRow(): NoteRow {
-    val titleText = title?.takeIf { it.isNotBlank() } ?: "Untitled"
-    return NoteRow(
-        id = id ?: 0L,
-        title = titleText,
-        preview = previewFromJson(lines_json, titleText),
-        isPinned = is_pinned == 1L,
-        modifiedAt = modified_at ?: 0L,
-        createdAt = created_at ?: 0L
-    )
-}
-
-private fun Note.toDocument(json: Json): NoteDocument? {
-    val id = id ?: return null
-    val lines = runCatching {
-        json.decodeFromString<List<EditorLine>>(lines_json)
-    }.getOrDefault(emptyList())
-    return NoteDocument(
-        id = id,
-        title = title ?: "Untitled",
-        lines = lines,
-        isPinned = is_pinned == 1L,
-        sourcePath = source_path,
-        lineEnding = runCatching { LineEnding.valueOf(line_ending ?: "LF") }.getOrDefault(LineEnding.LF),
-        createdAt = created_at ?: 0L,
-        modifiedAt = modified_at ?: 0L
-    )
 }
 
 /**
@@ -119,8 +117,8 @@ private fun Note.toDocument(json: Json): NoteDocument? {
  * (id, spans[{text,..}], ...), so the first `"text":"` value is the first
  * span of the first line. Escapes are unescaped best-effort.
  */
-private fun previewFromJson(linesJson: String?, fallback: String): String {
-    if (linesJson.isNullOrBlank()) return fallback
+private fun previewFromJson(linesJson: String, fallback: String): String {
+    if (linesJson.isBlank()) return fallback
     val idx = linesJson.indexOf("\"text\":\"")
     if (idx < 0) return fallback
     var i = idx + 8

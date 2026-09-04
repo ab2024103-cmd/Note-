@@ -32,10 +32,10 @@ object AndroidPlatform {
     lateinit var appContext: Context
         private set
 
-    private lateinit var openLauncher: ActivityResultLauncher<Array<String>>
-    private lateinit var createLauncher: ActivityResultLauncher<String>
-    private var pendingOpen: CompletableDeferred<PickedFile?>? = null
-    private var pendingCreate: CompletableDeferred<PickedFile?>? = null
+    internal lateinit var openLauncher: ActivityResultLauncher<Array<String>>
+    internal lateinit var createLauncher: ActivityResultLauncher<String>
+    internal var pendingOpen: CompletableDeferred<PickedFile?>? = null
+    internal var pendingCreate: CompletableDeferred<PickedFile?>? = null
 
     val isAttached: Boolean get() = ::appContext.isInitialized
 
@@ -67,7 +67,7 @@ object AndroidPlatform {
         val name = queryDisplayName(uri) ?: uri.lastPathSegment ?: "note.txt"
         val cr = appContext.contentResolver
         return PickedFile(
-            displayName = uri.toString(),
+            displayName = name,
             readText = {
                 cr.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
             },
@@ -88,9 +88,9 @@ object AndroidPlatform {
 }
 
 actual object AppDispatchers {
-    actual val main = Dispatchers.Main
-    actual val io = Dispatchers.IO
-    actual val default = Dispatchers.Default
+    actual val main: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Main
+    actual val io: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO
+    actual val default: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Default
 }
 
 actual fun appCoreScope(): CoroutineScope = CoroutineScope(SupervisorJob() + AppDispatchers.main)

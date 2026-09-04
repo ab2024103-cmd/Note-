@@ -1,18 +1,19 @@
 package com.notepadpro.shared.platform
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isShiftPressed
-import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.input.key.type
+import android.view.KeyEvent as AndroidKeyEvent
 
 /**
  * Android: hardware-keyboard (Chromebook / BT keyboards) support through the
@@ -30,7 +31,7 @@ actual fun PlatformKeyScope(
         modifier = Modifier.onPreviewKeyEvent { event ->
             if (!latestEnabled) return@onPreviewKeyEvent false
             val translated = translateAndroid(event)
-            translated?.let { latestOnKey(it) } ?: false
+            if (translated != null) latestOnKey(translated) else false
         }
     ) {
         content()
@@ -42,10 +43,16 @@ actual fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit) {
     BackHandler(enabled = enabled, onBack = onBack)
 }
 
+/**
+ * Maps a compose key event onto the shared key model. On Android,
+ * [androidx.compose.ui.input.key.Key.value] carries the Android key code.
+ */
 private fun translateAndroid(e: KeyEvent): PlatformKeyEvent? {
-    if (e.key == Key.Unknown) return null
+    val code = e.key.value
+    if (code <= 0) return null
+    val mapped = mapAndroidKeyCode(code) ?: return null
     return PlatformKeyEvent(
-        key = mapAndroidKey(e.key),
+        key = mapped,
         ctrl = e.isCtrlPressed,
         shift = e.isShiftPressed,
         alt = e.isAltPressed,
@@ -53,59 +60,31 @@ private fun translateAndroid(e: KeyEvent): PlatformKeyEvent? {
     )
 }
 
+/** A..Z, 0..9 and navigation keys. Returns null for anything unmapped. */
 @Suppress("LongMethod", "CyclomaticComplexMethod")
-private fun mapAndroidKey(key: Key): CommonKey = when (key) {
-    Key.A -> CommonKey.A
-    Key.B -> CommonKey.B
-    Key.C -> CommonKey.C
-    Key.D -> CommonKey.D
-    Key.E -> CommonKey.E
-    Key.F -> CommonKey.F
-    Key.G -> CommonKey.G
-    Key.H -> CommonKey.H
-    Key.I -> CommonKey.I
-    Key.J -> CommonKey.J
-    Key.K -> CommonKey.K
-    Key.L -> CommonKey.L
-    Key.M -> CommonKey.M
-    Key.N -> CommonKey.N
-    Key.O -> CommonKey.O
-    Key.P -> CommonKey.P
-    Key.Q -> CommonKey.Q
-    Key.R -> CommonKey.R
-    Key.S -> CommonKey.S
-    Key.T -> CommonKey.T
-    Key.U -> CommonKey.U
-    Key.V -> CommonKey.V
-    Key.W -> CommonKey.W
-    Key.X -> CommonKey.X
-    Key.Y -> CommonKey.Y
-    Key.Z -> CommonKey.Z
-    Key.Number0 -> CommonKey.DIGIT_0
-    Key.Number1 -> CommonKey.DIGIT_1
-    Key.Number2 -> CommonKey.DIGIT_2
-    Key.Number3 -> CommonKey.DIGIT_3
-    Key.Number4 -> CommonKey.DIGIT_4
-    Key.Number5 -> CommonKey.DIGIT_5
-    Key.Number6 -> CommonKey.DIGIT_6
-    Key.Number7 -> CommonKey.DIGIT_7
-    Key.Number8 -> CommonKey.DIGIT_8
-    Key.Number9 -> CommonKey.DIGIT_9
-    Key.Enter -> CommonKey.ENTER
-    Key.Tab -> CommonKey.TAB
-    Key.Backspace -> CommonKey.BACKSPACE
-    Key.Delete -> CommonKey.DELETE
-    Key.DirectionUp -> CommonKey.ARROW_UP
-    Key.DirectionDown -> CommonKey.ARROW_DOWN
-    Key.DirectionLeft -> CommonKey.ARROW_LEFT
-    Key.DirectionRight -> CommonKey.ARROW_RIGHT
-    Key.Home -> CommonKey.HOME
-    Key.End -> CommonKey.END
-    Key.PageUp -> CommonKey.PAGE_UP
-    Key.PageDown -> CommonKey.PAGE_DOWN
-    Key.Escape -> CommonKey.ESCAPE
-    Key.Minus -> CommonKey.MINUS
-    Key.Equals -> CommonKey.EQUALS
-    Key.Spacebar -> CommonKey.SPACE
-    else -> CommonKey.UNKNOWN
+private fun mapAndroidKeyCode(code: Int): CommonKey? {
+    // CommonKey order: UNKNOWN(0), A..Z(1..26), DIGIT_0..DIGIT_9(27..36), ...
+    val a = AndroidKeyEvent.KEYCODE_A // 29
+    if (code in a..a + 25) return CommonKey.values()[code - a + 1]
+    val n0 = AndroidKeyEvent.KEYCODE_0 // 7
+    if (code in n0..n0 + 9) return CommonKey.values()[27 + (code - n0)]
+    return when (code) {
+        AndroidKeyEvent.KEYCODE_ENTER -> CommonKey.ENTER
+        AndroidKeyEvent.KEYCODE_TAB -> CommonKey.TAB
+        AndroidKeyEvent.KEYCODE_DEL -> CommonKey.BACKSPACE
+        AndroidKeyEvent.KEYCODE_FORWARD_DEL -> CommonKey.DELETE
+        AndroidKeyEvent.KEYCODE_DPAD_UP -> CommonKey.ARROW_UP
+        AndroidKeyEvent.KEYCODE_DPAD_DOWN -> CommonKey.ARROW_DOWN
+        AndroidKeyEvent.KEYCODE_DPAD_LEFT -> CommonKey.ARROW_LEFT
+        AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> CommonKey.ARROW_RIGHT
+        AndroidKeyEvent.KEYCODE_MOVE_HOME -> CommonKey.HOME
+        AndroidKeyEvent.KEYCODE_MOVE_END -> CommonKey.END
+        AndroidKeyEvent.KEYCODE_PAGE_UP -> CommonKey.PAGE_UP
+        AndroidKeyEvent.KEYCODE_PAGE_DOWN -> CommonKey.PAGE_DOWN
+        AndroidKeyEvent.KEYCODE_ESCAPE -> CommonKey.ESCAPE
+        AndroidKeyEvent.KEYCODE_MINUS -> CommonKey.MINUS
+        AndroidKeyEvent.KEYCODE_EQUALS -> CommonKey.EQUALS
+        AndroidKeyEvent.KEYCODE_SPACE -> CommonKey.SPACE
+        else -> null
+    }
 }

@@ -5,7 +5,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,13 +13,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.AlertDialog
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Text
 import androidx.compose.material.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -28,8 +27,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -37,172 +37,166 @@ import com.notepadpro.shared.AppCore
 import com.notepadpro.shared.domain.model.NoteRow
 import com.notepadpro.shared.platform.formatTimestamp
 
+/** Whether the given color reads as a dark surface. */
+@Composable
+fun isSurfaceDark(): Boolean {
+    val bg = MaterialTheme.colors.surface
+    val luminance = 0.299 * bg.red + 0.587 * bg.green + 0.114 * bg.blue
+    return luminance < 0.5
+}
+
 /**
  * Notes sidebar: search box + note list (DB-backed, refreshed by the core).
+ * Delete asks for confirmation; pin/unpin is a one-tap action.
  */
 @Composable
 fun SidebarPane(core: AppCore, darkTheme: Boolean) {
-    val uiState by core.ui.collectAsState()
     val notes by core.notes.collectAsState()
-    var deleteTarget by remember { mutableStateOf<NoteRow?>(null) }
+    var search by remember { mutableStateOf("") }
+    var pendingDelete by remember { mutableStateOf<NoteRow?>(null) }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        Text(
-            "Notes",
-            style = MaterialTheme.typography.h6,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 15.sp,
-            modifier = Modifier.padding(start = 14.dp, top = 10.dp, bottom = 6.dp)
-        )
-        SidebarSearch(query = uiState.searchQuery, onQuery = { core.onSearchQueryChanged(it) })
-        Spacer(Modifier.size(4.dp))
-        if (notes.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp, vertical = 8.dp)) {
+        // Search box with placeholder overlay.
+        Box(modifier = Modifier.fillMaxWidth()) {
+            BasicTextField(
+                value = search,
+                onValueChange = {
+                    search = it
+                    core.onSearchQueryChanged(it)
+                },
+                singleLine = true,
+                cursorBrush = SolidColor(MaterialTheme.colors.primary),
+                textStyle = TextStyle(color = MaterialTheme.colors.onSurface, fontSize = 13.sp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        if (isSurfaceDark()) androidx.compose.ui.graphics.Color(0xFF2A2A2A)
+                        else MaterialTheme.colors.onSurface.copy(alpha = 0.07f),
+                        RoundedCornerShape(8.dp)
+                    )
+                    .padding(horizontal = 10.dp, vertical = 7.dp)
+            )
+            if (search.isEmpty()) {
                 Text(
-                    if (uiState.searchQuery.isBlank()) "No notes yet.\nTap ＋ New or press Ctrl+N."
-                    else "No notes match \u201c${uiState.searchQuery}\u201d.",
+                    "Search notes…",
+                    color = MaterialTheme.colors.onSurface.copy(alpha = 0.4f),
                     fontSize = 13.sp,
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(start = 10.dp)
+                )
+            }
+        }
+
+        Spacer(Modifier.size(6.dp))
+        val sorted = remember(notes) { notes.sortedByDescending { it.isPinned }.thenByDescending { it.modifiedAt } }
+        if (sorted.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    if (search.isBlank()) "No notes yet.\nTap ＋ New to start." else "No notes match “$search”.",
                     color = MaterialTheme.colors.onSurface.copy(alpha = 0.45f),
-                    modifier = Modifier.padding(20.dp)
+                    fontSize = 13.sp
                 )
             }
         } else {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(notes, key = { it.id }) { row ->
-                    NoteListItem(
+                items(sorted, key = { it.id }) { row ->
+                    NoteRowItem(
                         row = row,
-                        isOpen = false,
-                        onClick = { core.openNote(row) },
-                        onPin = { core.togglePinned(row) },
-                        onDelete = { deleteTarget = row }
+                        darkTheme = darkTheme,
+                        onOpen = { core.openNote(row) },
+                        onTogglePin = { core.togglePinned(row) },
+                        onDelete = { pendingDelete = row }
                     )
                 }
             }
         }
     }
 
-    deleteTarget?.let { target ->
+    if (pendingDelete != null) {
+        val target = pendingDelete!!
         AlertDialog(
-            onDismissRequest = { deleteTarget = null },
+            onDismissRequest = { pendingDelete = null },
             title = { Text("Delete note?") },
-            text = {
-                Text(
-                    "Delete \u201c${target.title}\u201d from the library?\n" +
-                        "The linked file on disk (if any) will NOT be deleted.",
-                    fontSize = 13.sp
-                )
-            },
+            text = { Text("“${target.title}” will be removed from the library. The saved file (if any) is not touched.") },
             confirmButton = {
                 TextButton(onClick = {
-                    deleteTarget = null
+                    pendingDelete = null
                     core.deleteNote(target)
-                }) { Text("Delete", color = MaterialTheme.colors.error) }
+                }) { Text("Delete") }
             },
             dismissButton = {
-                TextButton(onClick = { deleteTarget = null }) { Text("Cancel") }
+                TextButton(onClick = { pendingDelete = null }) { Text("Cancel") }
             }
         )
     }
 }
 
 @Composable
-private fun SidebarSearch(query: String, onQuery: (String) -> Unit) {
-    var tfv by remember { mutableStateOf(TextFieldValue(query)) }
-    LaunchedEffect(query) {
-        if (tfv.text != query) tfv = TextFieldValue(query)
-    }
-    val bg = if (isDarkSurface()) androidx.compose.ui.graphics.Color(0xFF2A2A2A)
-    else androidx.compose.ui.graphics.Color(0xFFF0F0F0)
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 10.dp)
-            .background(bg, androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
-    ) {
-        BasicTextField(
-            value = tfv,
-            onValueChange = { nv ->
-                tfv = nv
-                onQuery(nv.text)
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 8.dp),
-            textStyle = MaterialTheme.typography.body2.copy(fontSize = 13.sp),
-            singleLine = true
-        )
-        if (query.isEmpty()) {
-            Text(
-                "Search notes…",
-                fontSize = 13.sp,
-                color = MaterialTheme.colors.onSurface.copy(alpha = 0.4f),
-                modifier = Modifier.padding(start = 10.dp, top = 8.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun NoteListItem(
+private fun NoteRowItem(
     row: NoteRow,
-    isOpen: Boolean,
-    onClick: () -> Unit,
-    onPin: () -> Unit,
+    darkTheme: Boolean,
+    onOpen: () -> Unit,
+    onTogglePin: () -> Unit,
     onDelete: () -> Unit
 ) {
-    Column(
+    val bg = MaterialTheme.colors.surface
+    val dark = isSurfaceDark()
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() }
-            .padding(horizontal = 10.dp, vertical = 6.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                if (row.isPinned) "★ " else "",
-                fontSize = 11.sp,
-                color = MaterialTheme.colors.primary
+            .background(
+                if (row.isPinned) {
+                    if (dark) MaterialTheme.colors.primary.copy(alpha = 0.10f)
+                    else MaterialTheme.colors.primary.copy(alpha = 0.08f)
+                } else bg,
+                RoundedCornerShape(8.dp)
             )
+            .clickable(onClick = onOpen)
+            .padding(horizontal = 8.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
             Text(
-                row.title,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
+                row.title.ifBlank { "Untitled" },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f)
+                fontSize = 13.sp,
+                fontWeight = if (row.isPinned) FontWeight.SemiBold else FontWeight.Normal
             )
-        }
-        if (row.preview.isNotEmpty() && row.preview != row.title) {
-            Text(
-                row.preview,
-                fontSize = 12.sp,
-                color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
+            if (row.preview.isNotBlank()) {
+                Text(
+                    row.preview,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colors.onSurface.copy(alpha = 0.55f),
+                    fontSize = 11.sp
+                )
+            }
             Text(
                 formatTimestamp(row.modifiedAt),
-                fontSize = 10.sp,
-                color = MaterialTheme.colors.onSurface.copy(alpha = 0.4f),
-                modifier = Modifier.weight(1f)
+                color = MaterialTheme.colors.onSurface.copy(alpha = 0.38f),
+                fontSize = 10.sp
             )
-            TextButton(onClick = onPin, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
-                Text(if (row.isPinned) "Unpin" else "Pin", fontSize = 11.sp)
-            }
-            TextButton(onClick = onDelete, contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) {
-                Text("Delete", fontSize = 11.sp, color = MaterialTheme.colors.error)
-            }
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                if (row.isPinned) "★" else "☆",
+                fontSize = 15.sp,
+                color = if (row.isPinned) MaterialTheme.colors.primary
+                else MaterialTheme.colors.onSurface.copy(alpha = 0.4f),
+                modifier = Modifier
+                    .clickable(onClick = onTogglePin)
+                    .padding(4.dp)
+            )
+            Text(
+                "🗑",
+                fontSize = 13.sp,
+                color = MaterialTheme.colors.onSurface.copy(alpha = 0.45f),
+                modifier = Modifier
+                    .clickable(onClick = onDelete)
+                    .padding(4.dp)
+            )
         }
     }
-}
-
-@Composable
-private fun isDarkSurface(): Boolean {
-    val c = MaterialTheme.colors.surface
-    return (0.299 * c.red + 0.587 * c.green + 0.114 * c.blue) < 0.5
 }
