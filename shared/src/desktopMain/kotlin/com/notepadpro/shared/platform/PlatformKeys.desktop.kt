@@ -1,9 +1,10 @@
 package com.notepadpro.shared.platform
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isAltPressed
@@ -11,8 +12,10 @@ import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.input.key.type
+import java.awt.event.KeyEvent as AwtKeyEvent
 
+/** Desktop key scope: Compose desktop dispatches events through the same pipeline. */
 @Composable
 actual fun PlatformKeyScope(
     enabled: Boolean,
@@ -25,7 +28,7 @@ actual fun PlatformKeyScope(
         modifier = Modifier.onPreviewKeyEvent { event ->
             if (!latestEnabled) return@onPreviewKeyEvent false
             val translated = translateDesktop(event)
-            translated?.let { latestOnKey(it) } ?: false
+            if (translated != null) latestOnKey(translated) else false
         }
     ) {
         content()
@@ -38,9 +41,9 @@ actual fun PlatformBackHandler(enabled: Boolean, onBack: () -> Unit) {
 }
 
 private fun translateDesktop(e: KeyEvent): PlatformKeyEvent? {
-    if (e.key == Key.Unknown) return null
+    if (e.key.value <= 0) return null
     return PlatformKeyEvent(
-        key = mapDesktopKey(e.key),
+        key = mapDesktopKeyCode(e.key.value),
         ctrl = e.isCtrlPressed,
         shift = e.isShiftPressed,
         alt = e.isAltPressed,
@@ -48,59 +51,37 @@ private fun translateDesktop(e: KeyEvent): PlatformKeyEvent? {
     )
 }
 
+/**
+ * Desktop Key.value carries the AWT virtual-key code, which is ASCII-based
+ * for letters/digits and VK_* for control keys.
+ */
 @Suppress("LongMethod", "CyclomaticComplexMethod")
-private fun mapDesktopKey(key: Key): CommonKey = when (key) {
-    Key.A -> CommonKey.A
-    Key.B -> CommonKey.B
-    Key.C -> CommonKey.C
-    Key.D -> CommonKey.D
-    Key.E -> CommonKey.E
-    Key.F -> CommonKey.F
-    Key.G -> CommonKey.G
-    Key.H -> CommonKey.H
-    Key.I -> CommonKey.I
-    Key.J -> CommonKey.J
-    Key.K -> CommonKey.K
-    Key.L -> CommonKey.L
-    Key.M -> CommonKey.M
-    Key.N -> CommonKey.N
-    Key.O -> CommonKey.O
-    Key.P -> CommonKey.P
-    Key.Q -> CommonKey.Q
-    Key.R -> CommonKey.R
-    Key.S -> CommonKey.S
-    Key.T -> CommonKey.T
-    Key.U -> CommonKey.U
-    Key.V -> CommonKey.V
-    Key.W -> CommonKey.W
-    Key.X -> CommonKey.X
-    Key.Y -> CommonKey.Y
-    Key.Z -> CommonKey.Z
-    Key.Number0 -> CommonKey.DIGIT_0
-    Key.Number1 -> CommonKey.DIGIT_1
-    Key.Number2 -> CommonKey.DIGIT_2
-    Key.Number3 -> CommonKey.DIGIT_3
-    Key.Number4 -> CommonKey.DIGIT_4
-    Key.Number5 -> CommonKey.DIGIT_5
-    Key.Number6 -> CommonKey.DIGIT_6
-    Key.Number7 -> CommonKey.DIGIT_7
-    Key.Number8 -> CommonKey.DIGIT_8
-    Key.Number9 -> CommonKey.DIGIT_9
-    Key.Enter -> CommonKey.ENTER
-    Key.Tab -> CommonKey.TAB
-    Key.Backspace -> CommonKey.BACKSPACE
-    Key.Delete -> CommonKey.DELETE
-    Key.DirectionUp -> CommonKey.ARROW_UP
-    Key.DirectionDown -> CommonKey.ARROW_DOWN
-    Key.DirectionLeft -> CommonKey.ARROW_LEFT
-    Key.DirectionRight -> CommonKey.ARROW_RIGHT
-    Key.Home -> CommonKey.HOME
-    Key.End -> CommonKey.END
-    Key.PageUp -> CommonKey.PAGE_UP
-    Key.PageDown -> CommonKey.PAGE_DOWN
-    Key.Escape -> CommonKey.ESCAPE
-    Key.Minus -> CommonKey.MINUS
-    Key.Equals -> CommonKey.EQUALS
-    Key.Spacebar -> CommonKey.SPACE
-    else -> CommonKey.UNKNOWN
+private fun mapDesktopKeyCode(code: Int): CommonKey {
+    // A..Z: VK_A..VK_Z (65..90); CommonKey order: UNKNOWN(0), A..Z(1..26)
+    if (code in AwtKeyEvent.VK_A..AwtKeyEvent.VK_Z) {
+        return CommonKey.values()[code - AwtKeyEvent.VK_A + 1]
+    }
+    // 0..9: VK_0..VK_9 (48..57); CommonKey: DIGIT_0 starts at index 27
+    if (code in AwtKeyEvent.VK_0..AwtKeyEvent.VK_9) {
+        return CommonKey.values()[27 + (code - AwtKeyEvent.VK_0)]
+    }
+    return when (code) {
+        AwtKeyEvent.VK_ENTER -> CommonKey.ENTER
+        AwtKeyEvent.VK_TAB -> CommonKey.TAB
+        AwtKeyEvent.VK_BACK_SPACE -> CommonKey.BACKSPACE
+        AwtKeyEvent.VK_DELETE -> CommonKey.DELETE
+        AwtKeyEvent.VK_UP -> CommonKey.ARROW_UP
+        AwtKeyEvent.VK_DOWN -> CommonKey.ARROW_DOWN
+        AwtKeyEvent.VK_LEFT -> CommonKey.ARROW_LEFT
+        AwtKeyEvent.VK_RIGHT -> CommonKey.ARROW_RIGHT
+        AwtKeyEvent.VK_HOME -> CommonKey.HOME
+        AwtKeyEvent.VK_END -> CommonKey.END
+        AwtKeyEvent.VK_PAGE_UP -> CommonKey.PAGE_UP
+        AwtKeyEvent.VK_PAGE_DOWN -> CommonKey.PAGE_DOWN
+        AwtKeyEvent.VK_ESCAPE -> CommonKey.ESCAPE
+        AwtKeyEvent.VK_MINUS -> CommonKey.MINUS
+        AwtKeyEvent.VK_EQUALS -> CommonKey.EQUALS
+        AwtKeyEvent.VK_SPACE -> CommonKey.SPACE
+        else -> CommonKey.UNKNOWN
+    }
 }

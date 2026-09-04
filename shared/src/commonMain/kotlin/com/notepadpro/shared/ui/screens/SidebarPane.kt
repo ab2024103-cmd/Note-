@@ -89,7 +89,12 @@ fun SidebarPane(core: AppCore, darkTheme: Boolean) {
         }
 
         Spacer(Modifier.size(6.dp))
-        val sorted = remember(notes) { notes.sortedByDescending { it.isPinned }.thenByDescending { it.modifiedAt } }
+        val sorted = remember(notes) {
+            notes.sortedWith(
+                compareByDescending<NoteRow> { it.isPinned }
+                    .thenByDescending { it.modifiedAt }
+            )
+        }
         if (sorted.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(

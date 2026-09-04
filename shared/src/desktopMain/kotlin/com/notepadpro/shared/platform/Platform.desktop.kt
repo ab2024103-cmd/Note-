@@ -1,23 +1,23 @@
 package com.notepadpro.shared.platform
 
+import app.cash.sqldelight.db.SqlDriver
+import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import com.notepadpro.shared.data.db.NoteDatabase
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.resume
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
 import java.io.File
 import java.text.DateFormat
 import java.util.Date
 import java.util.UUID
-import app.cash.sqldelight.db.SqlDriver
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 
 actual object AppDispatchers {
-    actual val main = Dispatchers.Main
-    actual val io = Dispatchers.IO
-    actual val default = Dispatchers.Default
+    actual val main: CoroutineDispatcher = Dispatchers.Main
+    actual val io: CoroutineDispatcher = Dispatchers.IO
+    actual val default: CoroutineDispatcher = Dispatchers.Default
 }
 
 actual fun appCoreScope(): CoroutineScope = CoroutineScope(SupervisorJob() + AppDispatchers.main)
@@ -54,11 +54,11 @@ actual object FilePickerBridge {
                                     readText = { file.readText(Charsets.UTF_8) },
                                     writeText = { file.writeText(it, Charsets.UTF_8) }
                                 )
-                            ) {}
-                        } else cont.resume(null) {}
+                            )
+                        } else cont.resume(null)
                     }
                 } catch (t: Throwable) {
-                    if (cont.isActive) cont.resume(null) {}
+                    if (cont.isActive) cont.resume(null)
                 }
             }
         }
@@ -81,11 +81,11 @@ actual object FilePickerBridge {
                                     readText = { file.readText(Charsets.UTF_8) },
                                     writeText = { file.writeText(it, Charsets.UTF_8) }
                                 )
-                            ) {}
-                        } else cont.resume(null) {}
+                            )
+                        } else cont.resume(null)
                     }
                 } catch (t: Throwable) {
-                    if (cont.isActive) cont.resume(null) {}
+                    if (cont.isActive) cont.resume(null)
                 }
             }
         }
@@ -122,17 +122,11 @@ actual fun formatTimestamp(epochMs: Long): String =
  * jpackage installers are per-user, so APPDATA always exists for the app user.
  */
 actual fun createDatabaseDriver(): SqlDriver {
-    val base = (System.getenv("APPDATA") ?: System.getProperty("user.home"))
+    val base = System.getenv("APPDATA") ?: System.getProperty("user.home")
     val dir = File(base, if (System.getenv("APPDATA") != null) "NotePadPro" else ".notepadpro")
     dir.mkdirs()
     val url = "jdbc:sqlite:" + File(dir, DB_FILE_NAME).absolutePath
     val driver = JdbcSqliteDriver(url)
-    val exists = driver.executeQuery(
-        identifier = null,
-        sql = "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='note'",
-        mapper = { cursor -> if (cursor.next()) cursor.getLong(0) else 0L },
-        parameters = 0
-    ) > 0L
-    if (!exists) NoteDatabase.Schema.create(driver)
+    NoteDatabase.Schema.createIfNotExists(driver)
     return driver
 }

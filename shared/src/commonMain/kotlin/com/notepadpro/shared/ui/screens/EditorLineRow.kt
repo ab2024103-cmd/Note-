@@ -159,8 +159,10 @@ internal fun EditorLineRow(
      */
     LaunchedEffect(line.plainText, line.spans, line.checked, findRanges, findColor) {
         val expected: AnnotatedString = buildLineAnnotation(line, findRanges, findColor)
-        val current: AnnotatedString = tfv.text
-        if (current != expected) {
+        // Compare plain/decorated text structurally without depending on the
+        // exact TextFieldValue.text type (String vs AnnotatedString).
+        val currentText: String = tfv.text.toString()
+        if (currentText != expected.toString()) {
             val selMin = (caretToApply?.min ?: tfv.selection.min).coerceIn(0, lineText.length)
             tfv = TextFieldValue(expected, TextRange(selMin))
         }
