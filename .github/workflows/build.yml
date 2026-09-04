@@ -118,15 +118,18 @@ jobs:
           find artifacts -type f \( -name "*.apk" -o -name "*.msi" -o -name "*.exe" \) -exec cp {} staged/ \;
           (cd staged && md5sum * > ../CHECKSUMS.md5)
           echo "Built from commit $SHA on $(date -u)" > BUILD_INFO.txt
+          {
+            echo "NotePad Pro 1.0.0 — Kotlin Multiplatform notes app for Windows and Android."
+            echo
+            echo "Built from commit $SHA."
+            echo
+            echo "Assets: native jpackage .exe and .msi Windows installers; release and debug APKs (minSdk 21, offline-first, no network permission). Checksums in CHECKSUMS.md5."
+          } > NOTES.md
           gh release delete v1.0.0 --yes --cleanup-tag 2>/dev/null || true
           gh release create v1.0.0 \
             --target "$SHA" \
             --title "NotePad Pro 1.0.0" \
-            --notes "NotePad Pro 1.0.0 — Kotlin Multiplatform notes app for Windows and Android.
-
-Built from commit \`$SHA\`.
-
-Assets: native jpackage \`.exe\` and \`.msi\` Windows installers, release and debug APKs (minSdk 21, offline-first, no network permission). Checksums: \`CHECKSUMS.md5\`." \
+            --notes-file NOTES.md \
             staged/* CHECKSUMS.md5 BUILD_INFO.txt
 
   publish-logs:
