@@ -1,0 +1,161 @@
+name: build
+
+on:
+  push:
+    branches: ['arena/**', 'main']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Android release APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+      - name: Build release APK
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --console=plain --stacktrace \
+            :androidApp:assembleRelease :androidApp:assembleDebug \
+            2>&1 | tee "$RUNNER_TEMP/gradle-android.log"
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: log-android
+          path: ${{ runner.temp }}/gradle-android.log
+          if-no-files-found: warn
+      - name: Upload APK artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: |
+            androidApp/build/outputs/apk/release/*.apk
+            androidApp/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+  desktop-windows:
+    name: Windows EXE + MSI installer
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+      - name: Compile shared + desktop
+        shell: pwsh
+        run: |
+          ./gradlew --no-daemon --console=plain --stacktrace :desktopApp:compileKotlin `
+            2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\gradle-desktop.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install WiX Toolset (for MSI)
+        if: success()
+        shell: pwsh
+        run: |
+          choco install wixtoolset -y --no-progress | Out-Null
+      - name: Package MSI + EXE installers
+        if: success()
+        shell: pwsh
+        run: |
+          ./gradlew --no-daemon --console=plain --stacktrace `
+            :desktopApp:packageMsi :desktopApp:packageExe `
+            2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\gradle-desktop-package.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: log-desktop
+          path: |
+            ${{ runner.temp }}/gradle-desktop.log
+            ${{ runner.temp }}/gradle-desktop-package.log
+          if-no-files-found: warn
+      - name: Upload installer artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers
+          path: |
+            desktopApp/build/compose/binaries/main/msi/*.msi
+            desktopApp/build/compose/binaries/main/exe/*.exe
+          if-no-files-found: error
+
+  publish-binaries:
+    name: Publish binaries to GitHub Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [android, desktop-windows]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: false
+      - name: Create/update GitHub Release v1.0.0
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          SHA="${{ github.sha }}"
+          mkdir -p staged
+          find artifacts -type f \( -name "*.apk" -o -name "*.msi" -o -name "*.exe" \) -exec cp {} staged/ \;
+          (cd staged && md5sum * > ../CHECKSUMS.md5)
+          echo "Built from commit $SHA on $(date -u)" > BUILD_INFO.txt
+          {
+            echo "NotePad Pro 1.0.0 — Kotlin Multiplatform notes app for Windows and Android."
+            echo
+            echo "Built from commit $SHA."
+            echo
+            echo "Assets: native jpackage .exe and .msi Windows installers; release and debug APKs (minSdk 21, offline-first, no network permission). Checksums in CHECKSUMS.md5."
+          } > NOTES.md
+          gh release delete v1.0.0 --yes --cleanup-tag 2>/dev/null || true
+          gh release create v1.0.0 \
+            --target "$SHA" \
+            --title "NotePad Pro 1.0.0" \
+            --notes-file NOTES.md \
+            staged/* CHECKSUMS.md5 BUILD_INFO.txt
+
+  publish-logs:
+    name: Publish CI logs to ci-logs branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [android, desktop-windows]
+    if: failure()
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: logs
+          merge-multiple: false
+      - name: Commit logs to ci-logs branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHA=$(git rev-parse HEAD)
+          git config user.name "notepadpro-ci"
+          git config user.email "ci@notepadpro.local"
+          git checkout --orphan ci-logs
+          git rm -rfq --ignore-unmatch . || true
+          find logs -type f \( -name "*.log" \) -exec cp {} . \;
+          ls -la
+          git add -A
+          git commit -m "CI logs for $SHA [skip ci]" --allow-empty
+          git push origin HEAD:ci-logs --force

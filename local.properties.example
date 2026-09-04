@@ -1,0 +1,3 @@
+# Local SDK location (only needed for local builds; CI provides ANDROID_HOME)
+# Uncomment and set when building on a machine with the Android SDK installed:
+# sdk.dir=/path/to/android-sdk
