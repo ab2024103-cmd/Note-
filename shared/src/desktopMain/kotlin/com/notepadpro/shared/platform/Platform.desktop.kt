@@ -54,11 +54,11 @@ actual object FilePickerBridge {
                                     readText = { file.readText(Charsets.UTF_8) },
                                     writeText = { file.writeText(it, Charsets.UTF_8) }
                                 )
-                            )
-                        } else cont.resume(null)
+                            ) {}
+                        } else cont.resume(null) {}
                     }
                 } catch (t: Throwable) {
-                    if (cont.isActive) cont.resume(null)
+                    if (cont.isActive) cont.resume(null) {}
                 }
             }
         }
@@ -81,11 +81,11 @@ actual object FilePickerBridge {
                                     readText = { file.readText(Charsets.UTF_8) },
                                     writeText = { file.writeText(it, Charsets.UTF_8) }
                                 )
-                            )
-                        } else cont.resume(null)
+                            ) {}
+                        } else cont.resume(null) {}
                     }
                 } catch (t: Throwable) {
-                    if (cont.isActive) cont.resume(null)
+                    if (cont.isActive) cont.resume(null) {}
                 }
             }
         }
@@ -127,6 +127,7 @@ actual fun createDatabaseDriver(): SqlDriver {
     dir.mkdirs()
     val url = "jdbc:sqlite:" + File(dir, DB_FILE_NAME).absolutePath
     val driver = JdbcSqliteDriver(url)
-    NoteDatabase.Schema.createIfNotExists(driver)
+    // Schema.create fails when the file already holds the table; both cases are fine.
+    runCatching { NoteDatabase.Schema.create(driver) }
     return driver
 }
