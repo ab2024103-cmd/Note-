@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title description">
+  <title id="title">NotePad Pro</title>
+  <desc id="description">A white folded notepad with a mint pencil on an indigo rounded square.</desc>
+  <g id="background">
+    <path fill="#3949AB" d="M112 0H400C462 0 512 50 512 112V400C512 462 462 512 400 512H112C50 512 0 462 0 400V112C0 50 50 0 112 0Z"/>
+  </g>
+  <g id="mark">
+    <path id="paper" fill="#FFFFFF" d="M160 94H288L352 158V378Q352 404 326 404H160Q134 404 134 378V120Q134 94 160 94Z"/>
+    <path id="fold" fill="#C5CEFA" d="M288 94V138Q288 158 308 158H352Z"/>
+    <path id="rule-1" fill="#9FADE9" d="M182 200H276Q284 200 284 208Q284 216 276 216H182Q174 216 174 208Q174 200 182 200Z"/>
+    <path id="rule-2" fill="#9FADE9" d="M182 246H290Q298 246 298 254Q298 262 290 262H182Q174 262 174 254Q174 246 182 246Z"/>
+    <path id="rule-3" fill="#9FADE9" d="M182 292H238Q246 292 246 300Q246 308 238 308H182Q174 308 174 300Q174 292 182 292Z"/>
+    <path id="pencil-cap" fill="#BDF3E4" d="M386 214L400 200Q406 194 412 200L428 216Q434 222 428 228L414 242Z"/>
+    <path id="pencil-body" fill="#38D4B1" d="M276 324L386 214L414 242L304 352Z"/>
+    <path id="pencil-edge" fill="#159C88" d="M292 340L402 230L414 242L304 352Z"/>
+    <path id="pencil-tip" fill="#F3DFBA" d="M276 324L304 352L264 364Z"/>
+    <path id="pencil-nib" fill="#23306F" d="M270 347L281 358L264 364Z"/>
+  </g>
+</svg>

@@ -26,6 +26,7 @@ compose.desktop {
             description = "NotePad Pro - lightweight rich-text notes for desktop & Android"
             vendor = "NotePadPro"
             windows {
+                iconFile.set(project.file("src/main/resources/icons/notepad-pro.ico"))
                 menuGroup = "NotePad Pro"
                 perUserInstall = true
                 shortcut = true

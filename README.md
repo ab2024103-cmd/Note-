@@ -1,3 +1,5 @@
+<img src="assets/branding/notepad-pro.png" width="72" height="72" alt="NotePad Pro logo">
+
 # NotePad Pro
 
 A lightweight, offline-first rich-text notepad for Windows and Android, rebuilt in
@@ -25,9 +27,10 @@ Release **[v1.0.0](https://github.com/ab2024103-cmd/Note-/releases/tag/v1.0.0)**
 
 Checksums: [CHECKSUMS.md5](https://github.com/ab2024103-cmd/Note-/releases/download/v1.0.0/CHECKSUMS.md5)
 
-> The release APK is signed with the standard debug keystore (no secrets needed on a
-> public build server), so it can be installed on any device out of the box. For store
-> distribution, sign with your own key.
+> The APKs use a CI debug signing key, not a stable production key. Export/back up
+> your notes before updating: keys can differ between builds and block in-place
+> updates. **Do not uninstall the old app before backing up** — uninstalling removes
+> local notes. For store distribution and reliable updates, use a stable signing key.
 
 ## Features
 
@@ -80,6 +83,22 @@ GitHub Actions (`.github/workflows/build.yml`) builds both targets on every push
 publishes the artifacts as GitHub Release v1.0.0 only after both platform jobs
 succeed. Build logs and editor test reports are available as Actions artifacts,
 including for failed runs; CI does not write a separate log branch.
+
+## App logo and icons
+
+The original vector artwork is `assets/branding/notepad-pro.svg`. The same logo is
+used in the app header/About dialog and desktop window, Android legacy/adaptive
+launchers (including Android 13 themed icons), and Windows EXE/MSI shortcuts.
+
+To regenerate the checked-in PNG, ICO and vector resources, install ImageMagick:
+
+```bash
+python3 tools/generate_icons.py
+python3 tools/generate_icons.py --check
+```
+
+The check command uses only Python's standard library and also runs in CI. Normal
+app builds use the checked-in resources and do not require an image-generation tool.
 
 ## Repository layout
 

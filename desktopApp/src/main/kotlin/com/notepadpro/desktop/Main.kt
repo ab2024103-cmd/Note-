@@ -10,6 +10,7 @@ import com.notepadpro.shared.data.settings.SettingsRepository
 import com.notepadpro.shared.platform.appCoreScope
 import com.notepadpro.shared.data.settings.createSettings
 import com.notepadpro.shared.ui.NotePadProApp
+import com.notepadpro.shared.ui.notePadProIconPainter
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import java.awt.Dimension
@@ -45,6 +46,7 @@ fun main() = application {
         },
         state = windowState,
         title = "NotePad Pro",
+        icon = notePadProIconPainter(),
         resizable = true
     ) {
         window.minimumSize = Dimension(560, 460)

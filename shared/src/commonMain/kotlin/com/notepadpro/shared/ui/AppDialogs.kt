@@ -94,7 +94,15 @@ private fun ThemeChoice(label: String, mode: ThemeMode, current: ThemeMode, onPi
 fun AboutDialog(core: AppCore) {
     AlertDialog(
         onDismissRequest = { core.setAboutOpen(false) },
-        title = { Text("NotePad Pro") },
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                NotePadProLogo(modifier = Modifier.size(40.dp))
+                Text("NotePad Pro")
+            }
+        },
         text = {
             Column {
                 Text("Version 1.0.0", fontSize = 13.sp)

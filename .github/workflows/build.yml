@@ -24,6 +24,8 @@ jobs:
           distribution: temurin
           java-version: 17
           cache: gradle
+      - name: Validate application icons
+        run: python3 tools/generate_icons.py --check
       - name: Build release APK
         shell: bash
         run: |
@@ -59,6 +61,9 @@ jobs:
           distribution: temurin
           java-version: 17
           cache: gradle
+      - name: Validate application icons
+        shell: pwsh
+        run: python tools/generate_icons.py --check
       - name: Test shared editor + compile desktop
         shell: pwsh
         run: |
@@ -132,6 +137,10 @@ jobs:
             echo "NotePad Pro 1.0.0 — Kotlin Multiplatform notes app for Windows and Android."
             echo
             echo "Built from commit $SHA."
+            echo
+            echo "Includes the autosave/focus fixes and NotePad Pro branding: Android launcher/adaptive/themed icons, Windows application/installer icons, and an in-app logo."
+            echo
+            echo "Android update warning: export/back up notes before updating. CI debug signing keys can differ between builds, which may block in-place updates. Do not uninstall the old app before backing up; uninstalling removes local notes."
             echo
             echo "Assets: native jpackage .exe and .msi Windows installers; release and debug APKs (minSdk 21, offline-first, no network permission). Checksums in CHECKSUMS.md5."
           } > NOTES.md

@@ -27,6 +27,7 @@ kotlin {
             implementation(compose.foundation)
             implementation(compose.material)
             implementation(compose.ui)
+            implementation(compose.components.resources)
             // Exposed to thin entry-point modules that construct AppCore.
             api(libs.kotlinx.coroutines.core)
             api(libs.kotlinx.serialization.json)
@@ -59,6 +60,10 @@ kotlin {
             }
         }
     }
+}
+
+compose.resources {
+    packageOfResClass = "com.notepadpro.shared.generated.resources"
 }
 
 android {

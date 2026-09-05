@@ -1,0 +1,18 @@
+{
+  "source": "assets/branding/notepad-pro.svg",
+  "sourceSha256": "65d2d3bcffa962c4c74119d18d238cc14c95decc8685a2c04c01299c86d7b203",
+  "rasters": {
+    "androidApp/src/main/res/mipmap-hdpi/ic_launcher.png": "7c018c43f9c6cdc7c1072a98602c38c72e484d1abefcbfb83178ffd8c92d18ed",
+    "androidApp/src/main/res/mipmap-hdpi/ic_launcher_round.png": "4febf27c8fc299682c33fd87e051132074e89645689b28a7458d6bd0947e641d",
+    "androidApp/src/main/res/mipmap-mdpi/ic_launcher.png": "7798d60e8bb6cd5d35545b298f970bbbdf74bac9aae2c18680b561b6efee318a",
+    "androidApp/src/main/res/mipmap-mdpi/ic_launcher_round.png": "001ffed7f002f584c1b933da7330aaf3e4039903ef9362c30f358f7a7b953913",
+    "androidApp/src/main/res/mipmap-xhdpi/ic_launcher.png": "49e3a489f34862e5c665c7053b2c81fc398b61b560c91d3e777710d2b66a68b1",
+    "androidApp/src/main/res/mipmap-xhdpi/ic_launcher_round.png": "ed70f63950e929b873708a021961edab9c53c57bb24b0f477e72bbd93999189c",
+    "androidApp/src/main/res/mipmap-xxhdpi/ic_launcher.png": "526146cc3e476e59ed5d9ede957184fc164f44791e18a76eee9f995ce05a692a",
+    "androidApp/src/main/res/mipmap-xxhdpi/ic_launcher_round.png": "f1e16ff2eb9bf37e0301751f6ad03f4e085838e267d3bb7d26c309b3b3de4747",
+    "androidApp/src/main/res/mipmap-xxxhdpi/ic_launcher.png": "cc5ec45ca85a0d46ada75120285f1c14d19d2b54a907f2630a25d6892e02597c",
+    "androidApp/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png": "486e30c0e3e3a1e54647612c1b69a36e6e3eae2cf75551247899e6eedfc49b62",
+    "assets/branding/notepad-pro.png": "bc6bed09025d4d71bf095a437ac0828162dbc0779d373b7cf6a706b4c13e97db",
+    "desktopApp/src/main/resources/icons/notepad-pro.ico": "1963880554fe8f3211b92be733e19470c49943793e843b38d697ad4f7db11ada"
+  }
+}
