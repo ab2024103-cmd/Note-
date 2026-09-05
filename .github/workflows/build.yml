@@ -59,10 +59,10 @@ jobs:
           distribution: temurin
           java-version: 17
           cache: gradle
-      - name: Compile shared + desktop
+      - name: Test shared editor + compile desktop
         shell: pwsh
         run: |
-          ./gradlew --no-daemon --console=plain --stacktrace :desktopApp:compileKotlin `
+          ./gradlew --no-daemon --console=plain --stacktrace :shared:desktopTest :desktopApp:compileKotlin `
             2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\gradle-desktop.log"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Install WiX Toolset (for MSI)
@@ -86,6 +86,15 @@ jobs:
           path: |
             ${{ runner.temp }}/gradle-desktop.log
             ${{ runner.temp }}/gradle-desktop-package.log
+          if-no-files-found: warn
+      - name: Upload editor test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: editor-test-results
+          path: |
+            shared/build/test-results/desktopTest/**
+            shared/build/reports/tests/desktopTest/**
           if-no-files-found: warn
       - name: Upload installer artifacts
         if: success()
@@ -132,30 +141,3 @@ jobs:
             --title "NotePad Pro 1.0.0" \
             --notes-file NOTES.md \
             staged/* CHECKSUMS.md5 BUILD_INFO.txt
-
-  publish-logs:
-    name: Publish CI logs to ci-logs branch
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: [android, desktop-windows]
-    if: failure()
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          path: logs
-          merge-multiple: false
-      - name: Commit logs to ci-logs branch
-        shell: bash
-        run: |
-          set -euo pipefail
-          SHA=$(git rev-parse HEAD)
-          git config user.name "notepadpro-ci"
-          git config user.email "ci@notepadpro.local"
-          git checkout --orphan ci-logs
-          git rm -rfq --ignore-unmatch . || true
-          find logs -type f \( -name "*.log" \) -exec cp {} . \;
-          ls -la
-          git add -A
-          git commit -m "CI logs for $SHA [skip ci]" --allow-empty
-          git push origin HEAD:ci-logs --force

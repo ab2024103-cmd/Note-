@@ -15,6 +15,8 @@ import com.notepadpro.shared.platform.FilePickerBridge
 import com.notepadpro.shared.platform.PlatformInfo
 import com.notepadpro.shared.platform.currentTimeMillis
 import com.notepadpro.shared.platform.randomLineId
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -81,6 +83,7 @@ class EditorSession(
     private val scope: CoroutineScope,
     private val settings: SettingsRepository,
     initial: NoteDocument?,
+    private val ioDispatcher: CoroutineDispatcher = AppDispatchers.io,
     private val onPersist: suspend (NoteDocument) -> Long
 ) {
     private val _state = MutableStateFlow(initialState(initial))
@@ -108,7 +111,9 @@ class EditorSession(
     private var burstJob: Job? = null
 
     private var lastSavedVersion: Long = _state.value.version
-    private var saveJob: Job? = null
+    // Only the debounce delay is cancellable by subsequent edits/explicit flushes.
+    // Once it expires, the DB write must be allowed to finish.
+    private var autosaveDelayJob: Job? = null
     private var saveRunning = false
 
     private var disposed = false
@@ -642,17 +647,21 @@ class EditorSession(
 
     private fun scheduleAutosave() {
         if (disposed) return
-        saveJob?.cancel()
+        autosaveDelayJob?.cancel()
         val debounce = if (PlatformInfo.isLowMemoryDevice()) 1500L else 600L
-        saveJob = scope.launch {
+        autosaveDelayJob = scope.launch {
             delay(debounce)
+            // Detach before flushing: flushToDb cancels pending delays, and
+            // cancelling this coroutine here would cancel its own DB write.
+            autosaveDelayJob = null
             flushToDb()
         }
     }
 
     /** Persist the current document to SQLite. Safe to call from anywhere. */
     suspend fun flushToDb() {
-        saveJob?.cancel()
+        autosaveDelayJob?.cancel()
+        autosaveDelayJob = null
         val s = _state.value
         if (s.version == lastSavedVersion) return
         if (saveRunning) return // running save re-schedules when done
@@ -661,7 +670,7 @@ class EditorSession(
         val versionToSave = s.version
         val snapshot = s
         try {
-            val noteId = withContext(AppDispatchers.io) {
+            val noteId = withContext(ioDispatcher) {
                 onPersist(
                     NoteDocument(
                         id = snapshot.noteId,
@@ -678,8 +687,17 @@ class EditorSession(
             _state.update { it.copy(noteId = noteId) }
             if (versionToSave >= lastSavedVersion) lastSavedVersion = versionToSave
             hasEverSaved = true
-            _saveStatus.value = SaveStatus.SAVED
+            _saveStatus.value = if (_state.value.version == lastSavedVersion) {
+                SaveStatus.SAVED
+            } else {
+                SaveStatus.DIRTY
+            }
             _events.tryEmit(SessionEvent.DbSaved(noteId, versionToSave))
+        } catch (cancelled: CancellationException) {
+            // Cancellation is control flow, not a storage failure. Keep the
+            // document dirty so an active session can retry without an alert.
+            _saveStatus.value = SaveStatus.DIRTY
+            throw cancelled
         } catch (t: Throwable) {
             _saveStatus.value = SaveStatus.ERROR
             _events.tryEmit(SessionEvent.DbSaveFailed(t.message ?: "Database error"))
@@ -713,6 +731,8 @@ class EditorSession(
             settings.addRecentFile(picked.displayName)
             flushToDb()
             _events.tryEmit(SessionEvent.FileSaved(picked.displayName, true))
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (t: Throwable) {
             _events.tryEmit(SessionEvent.FileFailed(t.message ?: "Save failed"))
         }
@@ -743,6 +763,8 @@ class EditorSession(
             settings.addRecentFile(picked.displayName)
             _events.tryEmit(SessionEvent.FileOpened(picked.displayName, TextCodec.titleFromLines(lines)))
             return true
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (t: Throwable) {
             _events.tryEmit(SessionEvent.FileFailed(t.message ?: "Open failed"))
             return false
@@ -813,6 +835,6 @@ class EditorSession(
         if (disposed) return
         disposed = true
         burstJob?.cancel()
-        saveJob?.cancel()
+        autosaveDelayJob?.cancel()
     }
 }

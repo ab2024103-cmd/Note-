@@ -66,9 +66,20 @@ Prerequisites: JDK 17, Android SDK 34 (for the APK).
 ./gradlew :androidApp:assembleRelease
 ```
 
+Run the shared editor regression tests (autosave/cancellation and Compose focus)
+on the desktop JVM target:
+
+```bash
+./gradlew :shared:desktopTest
+```
+
+These tests also run in the Windows CI job before packaging. On headless Linux,
+use `xvfb-run -a ./gradlew :shared:desktopTest` if a display is required.
+
 GitHub Actions (`.github/workflows/build.yml`) builds both targets on every push and
-publishes the artifacts as GitHub Release v1.0.0. CI logs of failed runs are
-published to the `ci-logs` branch.
+publishes the artifacts as GitHub Release v1.0.0 only after both platform jobs
+succeed. Build logs and editor test reports are available as Actions artifacts,
+including for failed runs; CI does not write a separate log branch.
 
 ## Repository layout
 

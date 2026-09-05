@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -147,7 +148,7 @@ internal fun EditorLineRow(
     }
 
     // Register/unregister this row's FocusRequester.
-    DisposableEffect(line.id) {
+    DisposableEffect(line.id, focusRequester) {
         registerFocus(line.id, focusRequester)
         onDispose { unregisterFocus(line.id) }
     }
@@ -169,7 +170,7 @@ internal fun EditorLineRow(
     }
 
     // Keyboard-driven focus request for this row (arrow moves, Enter, undo...).
-    LaunchedEffect(caretToApply) {
+    LaunchedEffect(line.id, focusRequester, caretToApply) {
         val caret = caretToApply ?: return@LaunchedEffect
         tfv = tfv.copy(selection = TextRange(caret.min.coerceIn(0, lineText.length)))
         focusRequester.requestFocus()
@@ -246,6 +247,7 @@ internal fun EditorLineRow(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
+                .focusRequester(focusRequester)
                 .onFocusChanged { f ->
                     if (f.isFocused) {
                         applyCaretIfPending()
