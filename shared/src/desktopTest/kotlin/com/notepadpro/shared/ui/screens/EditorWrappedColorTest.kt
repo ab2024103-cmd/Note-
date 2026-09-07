@@ -96,6 +96,25 @@ class EditorWrappedColorTest {
         assertEquals(end, marked.single().end)
     }
 
+    @Test
+    fun aRealCaretMoveAfterSelectingTextDoesNotKeepTheOldSelection() {
+        editor()
+        val field = compose.onNode(hasSetTextAction()).performClick()
+        val layouts = mutableListOf<TextLayoutResult>()
+        field.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val layout = layouts.single()
+        field.performTextInputSelection(TextRange(layout.getLineStart(1), layout.getLineEnd(1)))
+        val start = layout.getLineStart(2)
+        val end = layout.getLineEnd(2)
+        field.performTextInputSelection(TextRange(start + 2))
+        compose.onNodeWithText("Color selection").performClick()
+        val marked = field.fetchSemanticsNode().config[SemanticsProperties.EditableText].spanStyles
+            .filter { it.item.background == Markers.spanBackground(HighlightColor.YELLOW) }
+        assertEquals(start, marked.single().start)
+        assertEquals(end, marked.single().end)
+        assertEquals(TextRange(start + 2), field.fetchSemanticsNode().config[SemanticsProperties.TextSelectionRange])
+    }
+
     private fun editor(): EditorSession {
         val session = EditorSession(scope, SettingsRepository(MapSettings(), Json),
             NoteDocument(lines = listOf(EditorLine.plain("p", text))), onPersist = { 1L })

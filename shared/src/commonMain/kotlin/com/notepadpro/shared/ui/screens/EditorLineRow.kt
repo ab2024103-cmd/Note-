@@ -158,6 +158,10 @@ internal fun EditorLineRow(
         )
     }
 
+    var fieldFocused by remember(line.id) { mutableStateOf(false) }
+    var editingSelection by remember(line.id) { mutableStateOf(tfv.selection) }
+    var pendingCollapse by remember(line.id) { mutableStateOf<TextRange?>(null) }
+
     // Register/unregister this row's FocusRequester.
     DisposableEffect(line.id, focusRequester) {
         registerFocus(line.id, focusRequester)
@@ -180,6 +184,23 @@ internal fun EditorLineRow(
         onVisualLineChanged(line.id, layout.getLineStart(row), layout.getLineEnd(row))
     }
 
+    // CoreTextField emits a collapsed selection when it loses focus. Its
+    // callback can arrive BEFORE our focus observer, so don't publish that
+    // ambiguous collapse until the focus transition has finished. A genuine
+    // cursor move inside the editor is accepted on the next composition;
+    // moving into a toolbar/menu preserves the editing selection instead.
+    LaunchedEffect(pendingCollapse, fieldFocused) {
+        val collapsed = pendingCollapse ?: return@LaunchedEffect
+        pendingCollapse = null
+        if (fieldFocused) {
+            editingSelection = collapsed
+            onTextChange(line.id, tfv.text, collapsed.start, collapsed.end)
+            reportVisualLine()
+        } else {
+            tfv = tfv.copy(selection = editingSelection)
+        }
+    }
+
     // Compare full annotations, not toString(): the latter discards colors and
     // makes formatting-only changes (including Find matches) invisible.
     val expected = remember(line, findRanges, findColor, currentFindRange) {
@@ -192,9 +213,12 @@ internal fun EditorLineRow(
             } else {
                 val caret = caretToApply
                 TextFieldValue(expected, TextRange(
-                    (caret?.start ?: tfv.selection.start).coerceIn(0, lineText.length),
-                    (caret?.end ?: tfv.selection.end).coerceIn(0, lineText.length)
-                ))
+                    (caret?.start ?: editingSelection.start).coerceIn(0, lineText.length),
+                    (caret?.end ?: editingSelection.end).coerceIn(0, lineText.length)
+                )).also {
+                    editingSelection = it.selection
+                    pendingCollapse = null
+                }
             }
         }
     }
@@ -208,6 +232,8 @@ internal fun EditorLineRow(
         tfv = tfv.copy(selection = TextRange(
             caret.start.coerceIn(0, lineText.length), caret.end.coerceIn(0, lineText.length)
         ))
+        editingSelection = tfv.selection
+        pendingCollapse = null
         focusRequester.requestFocus()
         onCaretApplied()
     }
@@ -217,6 +243,8 @@ internal fun EditorLineRow(
         tfv = tfv.copy(selection = TextRange(
             caret.start.coerceIn(0, lineText.length), caret.end.coerceIn(0, lineText.length)
         ))
+        editingSelection = tfv.selection
+        pendingCollapse = null
     }
 
     val wash = line.lineColor?.let { Markers.lineWash(it, darkTheme) }
@@ -279,9 +307,22 @@ internal fun EditorLineRow(
         BasicTextField(
             value = tfv,
             onValueChange = { newValue ->
-                tfv = newValue
-                onTextChange(line.id, newValue.text, newValue.selection.start, newValue.selection.end)
-                reportVisualLine()
+                val selectionOnlyCollapse = newValue.text == tfv.text &&
+                    newValue.selection.collapsed && !editingSelection.collapsed
+                if (selectionOnlyCollapse) {
+                    if (fieldFocused) {
+                        tfv = newValue
+                        pendingCollapse = newValue.selection
+                    } else {
+                        tfv = newValue.copy(selection = editingSelection)
+                    }
+                } else {
+                    tfv = newValue
+                    editingSelection = newValue.selection
+                    pendingCollapse = null
+                    onTextChange(line.id, newValue.text, newValue.selection.start, newValue.selection.end)
+                    reportVisualLine()
+                }
             },
             modifier = Modifier
                 .weight(1f)
@@ -289,10 +330,14 @@ internal fun EditorLineRow(
                 .bringIntoViewRequester(matchIntoView)
                 .focusRequester(focusRequester)
                 .onFocusChanged { f ->
+                    fieldFocused = f.isFocused
                     if (f.isFocused) {
                         applyCaretIfPending()
                         onRowFocused(line.id)
                         reportVisualLine()
+                    } else if (pendingCollapse != null) {
+                        tfv = tfv.copy(selection = editingSelection)
+                        pendingCollapse = null
                     }
                 },
             textStyle = TextStyle(
