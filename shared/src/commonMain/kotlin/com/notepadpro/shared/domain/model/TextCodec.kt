@@ -6,6 +6,10 @@ package com.notepadpro.shared.domain.model
  */
 object TextCodec {
 
+    /** Canonical editor newline; preserve blank lines and all other whitespace. */
+    fun normalizeLineEndings(raw: String): String =
+        raw.replace("\r\n", "\n").replace('\r', '\n')
+
     /** Detects the dominant line ending of a raw text blob. */
     fun detectLineEnding(raw: String): LineEnding {
         var crlf = 0

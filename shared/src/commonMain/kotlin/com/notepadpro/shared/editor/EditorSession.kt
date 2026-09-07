@@ -118,6 +118,25 @@ class EditorSession(
 
     private var disposed = false
 
+    // Only the active row's measured wrap range is needed. Never persist visual
+    // line breaks: they change with window width, font size and word wrapping.
+    private data class VisualLine(val id: String, val text: String, val range: Caret)
+    private var visualLine: VisualLine? = null
+
+    fun onVisualLineChanged(lineId: String, start: Int, end: Int) {
+        val state = _state.value
+        if (state.activeLineId != lineId) return
+        val text = state.lines.firstOrNull { it.id == lineId }?.plainText ?: return
+        visualLine = VisualLine(lineId, text, Caret(start.coerceIn(0, text.length), end.coerceIn(0, text.length)))
+    }
+
+    fun canMoveToAdjacentParagraph(delta: Int): Boolean {
+        val state = _state.value
+        val line = state.lines.firstOrNull { it.id == state.activeLineId } ?: return false
+        val visual = visualLine?.takeIf { it.id == line.id && it.text == line.plainText } ?: return true
+        return if (delta < 0) visual.range.min == 0 else visual.range.max == line.plainText.length
+    }
+
     private fun initialState(initial: NoteDocument?): DocState {
         val lines = initial?.lines?.takeIf { it.isNotEmpty() } ?: listOf(newBlankLine())
         return DocState(
@@ -139,11 +158,16 @@ class EditorSession(
     // Core text editing
     // ------------------------------------------------------------------
 
-    /** Single-line text change coming from a row's BasicTextField. */
+    /** Text/selection change from a row; normalize clipboard line endings first. */
     fun applyTextChange(lineId: String, newText: String, selStart: Int, selEnd: Int) {
         if (disposed) return
-        if (newText.contains('\n')) {
-            handleMultilineInput(lineId, newText)
+        val text = TextCodec.normalizeLineEndings(newText)
+        fun offset(rawOffset: Int): Int = if (text == newText) rawOffset.coerceIn(0, text.length)
+            else TextCodec.normalizeLineEndings(newText.take(rawOffset.coerceIn(0, newText.length))).length
+        val start = offset(selStart)
+        val end = offset(selEnd)
+        if ('\n' in text) {
+            handleMultilineInput(lineId, text, end)
             return
         }
         val state = _state.value
@@ -151,37 +175,36 @@ class EditorSession(
         if (index < 0) return
         val line = state.lines[index]
         val oldText = line.plainText
-        if (oldText == newText) {
-            // Caret-only move (also reports line focus).
-            moveCaretOnly(lineId, selStart, selEnd)
+        if (oldText == text) {
+            moveCaretOnly(lineId, start, end)
             return
         }
         ensureBurst(line)
-        val prefix = commonPrefixLen(oldText, newText)
-        val suffix = guardedSuffixLen(oldText, newText, prefix)
-        val newSpans = remapSpansForEdit(line.spans, oldText, newText, prefix, suffix)
-        val newLine = line.copy(spans = newSpans)
+        val prefix = commonPrefixLen(oldText, text)
+        val suffix = guardedSuffixLen(oldText, text, prefix)
+        val newSpans = remapSpansForEdit(line.spans, oldText, text, prefix, suffix)
         val out = state.lines.toMutableList()
-        out[index] = newLine
-        publish(out, activeLineId = lineId, caret = Caret(selStart, selEnd))
+        out[index] = line.copy(spans = newSpans)
+        publish(out, activeLineId = lineId, caret = Caret(start, end))
         scheduleBurstFlush()
     }
 
     private fun moveCaretOnly(lineId: String, selStart: Int, selEnd: Int) {
         _state.update { s ->
-            val clearAnchor = s.anchorLineId != null && s.anchorLineId != s.activeLineId
             s.copy(
                 activeLineId = lineId,
                 caret = Caret(selStart, selEnd),
                 focusLineId = lineId,
-                anchorLineId = if (clearAnchor) null else s.anchorLineId
+                anchorLineId = null,
+                numbers = if (s.activeLineId == lineId) s.numbers else computeNumbers(s.lines, lineId)
             )
         }
     }
 
     fun onLineFocused(lineId: String) {
-        _state.update {
-            it.copy(activeLineId = lineId, caret = it.caret ?: Caret(0, 0))
+        _state.update { s ->
+            if (s.activeLineId == lineId || s.lines.none { it.id == lineId }) s
+            else s.copy(activeLineId = lineId, caret = Caret(0, 0), numbers = computeNumbers(s.lines, lineId))
         }
     }
 
@@ -192,56 +215,31 @@ class EditorSession(
         return i
     }
 
-    /**
-     * Paste / IME commit containing '\n': normalize to plain text lines and
-     * explode into multiple EditorLines. Lines inherit list type/indent so
-     * pasting inside a list keeps working like Enter.
-     */
-    private fun handleMultilineInput(lineId: String, newText: String) {
+    /** Preserve prefix/suffix text and rich spans when a paste creates real lines. */
+    private fun handleMultilineInput(lineId: String, newText: String, selectionEnd: Int) {
         val state = _state.value
         val index = state.lines.indexOfFirst { it.id == lineId }
         if (index < 0) return
         val line = state.lines[index]
         val oldText = line.plainText
-        if (oldText.contains('\n')) return // invariant: lines never hold \n
-
-        flushBurst()
-        pushFullSnapshot()
-
         val prefix = commonPrefixLen(oldText, newText)
         val suffix = guardedSuffixLen(oldText, newText, prefix)
-        // The '\n' can only live inside the inserted region (old text has none).
-        val inserted = newText.substring(prefix, newText.length - suffix)
-        val parts = inserted.split('\n')
-        if (parts.size <= 1) return
-        val firstPart = parts[0]
-        val headLine = line.copy(
-            spans = remapSpansForEdit(
-                line.spans,
-                oldText,
-                oldText.substring(0, prefix) + firstPart + oldText.substring(oldText.length - suffix),
-                prefix,
-                suffix
-            )
-        )
-        val tailLines = parts.drop(1).map { part ->
-            EditorLine(
-                id = randomLineId(),
-                spans = if (part.isEmpty()) emptyList() else listOf(InlineSpan(part)),
-                listType = line.listType,
-                indent = line.indent
-            )
+        val spans = remapSpansForEdit(line.spans, oldText, newText, prefix, suffix)
+        val inserted = splitRichLines(line, spans)
+        var row = 0
+        var column = selectionEnd.coerceIn(0, newText.length)
+        while (row < inserted.lastIndex && column > inserted[row].plainText.length) {
+            column -= inserted[row].plainText.length + 1
+            row++
         }
+        val target = inserted[row]
+        val caret = Caret(column, column)
+        flushBurst()
+        pushFullSnapshot()
         val out = state.lines.toMutableList()
-        out[index] = headLine
-        out.addAll(index + 1, tailLines)
-        val caretEnd = prefix + firstPart.length
-        publish(
-            out,
-            activeLineId = headLine.id,
-            caret = Caret(caretEnd, caretEnd),
-            focus = headLine.id to Caret(caretEnd, caretEnd)
-        )
+        out.removeAt(index)
+        out.addAll(index, inserted)
+        publish(out, activeLineId = target.id, caret = caret, focus = target.id to caret)
     }
 
     // ------------------------------------------------------------------
@@ -253,14 +251,21 @@ class EditorSession(
         val index = state.lines.indexOfFirst { it.id == lineId }
         if (index < 0) return
         val line = state.lines[index]
-        val pos = if (state.activeLineId == lineId) (state.caret?.min ?: 0) else 0
-        flushBurst()
-        pushFullSnapshot()
-        val (left, right) = splitLineAt(line, pos)
-        val out = state.lines.toMutableList()
-        out[index] = left
-        out.add(index + 1, right)
-        publish(out, activeLineId = right.id, caret = Caret(0, 0), focus = right.id to Caret(0, 0))
+        if (line.listType != ListType.NONE && line.plainText.isBlank()) {
+            // Enter on an empty list item exits the list instead of adding
+            // another empty numbered row indefinitely.
+            flushBurst()
+            pushFullSnapshot()
+            val out = state.lines.toMutableList()
+            out[index] = line.copy(listType = ListType.NONE, indent = 0, checked = false)
+            publish(out, activeLineId = lineId, caret = Caret(0, 0), focus = lineId to Caret(0, 0))
+            return
+        }
+        val text = line.plainText
+        val selection = state.caret?.takeIf { state.activeLineId == lineId } ?: Caret(0, 0)
+        val start = selection.min.coerceIn(0, text.length)
+        val end = selection.max.coerceIn(start, text.length)
+        handleMultilineInput(lineId, text.take(start) + "\n" + text.substring(end), start + 1)
     }
 
     /** Backspace at start of a line: merge it into the previous line. */
@@ -310,14 +315,15 @@ class EditorSession(
         val targetLine = state.lines[target]
         val column = (state.caret?.min ?: 0)
         val caret = Caret(minOf(column, targetLine.plainText.length), minOf(column, targetLine.plainText.length))
-        val newAnchor = if (extend) (state.anchorLineId ?: active) else targetLine.id
+        val newAnchor = if (extend) (state.anchorLineId ?: active) else null
         _state.update {
             it.copy(
                 activeLineId = targetLine.id,
                 caret = caret,
                 anchorLineId = newAnchor,
                 focusLineId = targetLine.id,
-                focusRequest = targetLine.id to caret
+                focusRequest = targetLine.id to caret,
+                numbers = computeNumbers(state.lines, targetLine.id)
             )
         }
         return true
@@ -332,7 +338,8 @@ class EditorSession(
     private fun moveCaretOnLine(lineId: String, pos: Int) {
         _state.update { s ->
             val caret = Caret(pos, pos)
-            s.copy(activeLineId = lineId, caret = caret, focusLineId = lineId, focusRequest = lineId to caret)
+            s.copy(activeLineId = lineId, caret = caret, focusLineId = lineId, focusRequest = lineId to caret,
+                numbers = computeNumbers(s.lines, lineId))
         }
     }
 
@@ -363,7 +370,8 @@ class EditorSession(
                 anchorLineId = s.lines.first().id,
                 focusLineId = s.lines.last().id,
                 activeLineId = s.lines.last().id,
-                caret = Caret(0, 0)
+                caret = Caret(0, 0),
+                numbers = computeNumbers(s.lines, s.lines.last().id)
             )
         }
     }
@@ -371,7 +379,8 @@ class EditorSession(
     fun selectSingleLine(lineId: String) {
         _state.update { s ->
             if (s.lines.none { it.id == lineId }) s
-            else s.copy(anchorLineId = lineId, focusLineId = lineId)
+            else s.copy(activeLineId = lineId, anchorLineId = lineId, focusLineId = lineId,
+                numbers = computeNumbers(s.lines, lineId))
         }
     }
 
@@ -390,9 +399,27 @@ class EditorSession(
         _state.update { it.copy(anchorLineId = null, focusLineId = null) }
     }
 
-    fun setLineColor(color: HighlightColor?) = mapSelectedLines { setLineColor(it, color) }
+    /** Color selected characters, otherwise only the caret's measured visual line. */
+    fun setLineColor(color: HighlightColor?) {
+        if (_state.value.anchorLineId != null) setParagraphColor(color)
+        else colorTextRange(color, includeParagraphColor = true)
+    }
 
-    fun toggleList(type: ListType) = mapSelectedLines { toggleListType(it, type) }
+    /** Explicit whole-paragraph/gutter-selection action, separate from text coloring. */
+    fun setParagraphColor(color: HighlightColor?) = mapSelectedLines { setLineColor(it, color) }
+
+    fun toggleList(type: ListType) {
+        val state = _state.value
+        val ids = selectedLineIds().toSet()
+        val selected = state.lines.filter { it.id in ids }
+        if (selected.isEmpty()) return
+        val items = selected.filter { it.plainText.isNotBlank() || selected.size == 1 }
+        val remove = type == ListType.NONE || (items.isNotEmpty() && items.all { it.listType == type })
+        mapSelectedLines { line ->
+            val target = if (remove || (selected.size > 1 && line.plainText.isBlank())) ListType.NONE else type
+            line.copy(listType = target, checked = false, indent = if (target == ListType.NONE) 0 else line.indent)
+        }
+    }
 
     fun indentLines(delta: Int) = mapSelectedLines { changeIndent(it, delta) }
 
@@ -409,46 +436,40 @@ class EditorSession(
         publish(out, activeLineId = lineId, caret = s.caret)
     }
 
-    /**
-     * Inline "Mark" action on the active line's text selection.
-     * Cross-line selections fall back to whole-line highlight of every
-     * selected line (same fallback rule as the original spec).
-     */
-    fun markInlineSelection(color: HighlightColor) {
-        val s = _state.value
-        val ids = selectedLineIds()
-        if (ids.size > 1) {
-            setLineColor(color)
-            return
-        }
-        val lineId = s.activeLineId ?: return
-        val caret = s.caret ?: Caret(0, 0)
-        if (caret.max <= caret.min) {
-            setLineColor(color) // no inline selection -> whole-line color fallback
-            return
-        }
-        val line = s.lines.firstOrNull { it.id == lineId } ?: return
-        val textLen = line.plainText.length
-        if (caret.min >= textLen) return
-        flushBurst()
-        pushFullSnapshot()
-        val newLine = markRange(line, caret.min, caret.max.coerceAtMost(textLen), color)
-        val out = s.lines.map { if (it.id == lineId) newLine else it }
-        publish(out, caret = s.caret)
-    }
+    fun markInlineSelection(color: HighlightColor) = colorTextRange(color, includeParagraphColor = false)
 
-    /** Removes inline highlights inside the active line's selection. */
-    fun clearInlineSelection() {
-        val s = _state.value
-        val lineId = s.activeLineId ?: return
-        val caret = s.caret ?: Caret(0, 0)
-        if (caret.max <= caret.min) return
-        val line = s.lines.firstOrNull { it.id == lineId } ?: return
+    fun clearInlineSelection() = colorTextRange(null, includeParagraphColor = false)
+
+    private fun colorTextRange(color: HighlightColor?, includeParagraphColor: Boolean) {
+        val state = _state.value
+        if (state.anchorLineId != null) {
+            mapSelectedLines { line ->
+                if (color == null) clearMarkRange(line, 0, line.plainText.length)
+                else markRange(line, 0, line.plainText.length, color)
+            }
+            return
+        }
+        val line = state.lines.firstOrNull { it.id == state.activeLineId } ?: return
+        val text = line.plainText
+        val selection = state.caret?.takeIf { it.min != it.max }
+            ?: visualLine?.takeIf { it.id == line.id && it.text == text }?.range
+            ?: return // No measured row: never accidentally paint a whole paragraph.
+        val start = selection.min.coerceIn(0, text.length)
+        val end = selection.max.coerceIn(start, text.length)
+        if (start == end) return
+        // Old whole-paragraph backgrounds must not keep showing through a
+        // partially cleared range. Preserve their color outside the edited range.
+        val paragraphColor = line.lineColor
+        val base = if (includeParagraphColor && paragraphColor != null) {
+            line.copy(lineColor = null, spans = line.spans.map { span ->
+                if (span.highlighted) span else span.copy(highlighted = true, highlightColor = paragraphColor)
+            })
+        } else line
+        val colored = if (color == null) clearMarkRange(base, start, end) else markRange(base, start, end, color)
+        if (colored == line) return
         flushBurst()
         pushFullSnapshot()
-        val newLine = clearMarkRange(line, caret.min, caret.max.coerceAtMost(line.plainText.length))
-        val out = s.lines.map { if (it.id == lineId) newLine else it }
-        publish(out, caret = s.caret)
+        publish(state.lines.map { if (it.id == line.id) colored else it }, caret = state.caret)
     }
 
     /** Removes whole-line colors, inline highlights and list formatting. */
@@ -628,11 +649,11 @@ class EditorSession(
             it.copy(
                 version = it.version + 1,
                 lines = lines,
-                numbers = computeNumbers(lines),
+                numbers = computeNumbers(lines, active),
                 activeLineId = active,
                 caret = caret ?: it.caret,
                 focusLineId = focus?.first ?: it.focusLineId,
-                anchorLineId = anchor ?: it.anchorLineId,
+                anchorLineId = anchor,
                 focusRequest = focus ?: it.focusRequest,
                 empty = lines.isEmpty() || lines.all { l -> l.isEmptyLine }
             )
@@ -744,7 +765,7 @@ class EditorSession(
             val picked = FilePickerBridge.pickOpenFile() ?: return false
             val raw = withContext(AppDispatchers.io) { picked.readText() }
             val lineEnding = TextCodec.detectLineEnding(raw)
-            val rawLines = raw.replace("\r\n", "\n").replace('\r', '\n').split('\n')
+            val rawLines = TextCodec.normalizeLineEndings(raw).split('\n')
             val lines = rawLines.map { EditorLine.plain(randomLineId(), it) }
             flushBurst()
             pushFullSnapshot()

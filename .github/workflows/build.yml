@@ -70,6 +70,37 @@ jobs:
           ./gradlew --no-daemon --console=plain --stacktrace :shared:desktopTest :desktopApp:compileKotlin `
             2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP\gradle-desktop.log"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Report editor regression tests
+        if: always()
+        shell: pwsh
+        run: |
+          $reports = @(Get-ChildItem "shared/build/test-results/desktopTest/TEST-*.xml" -ErrorAction SilentlyContinue)
+          $tests = 0; $failures = 0; $skipped = 0
+          foreach ($file in $reports) {
+            [xml]$report = Get-Content -Raw $file.FullName
+            $tests += [int]$report.testsuite.tests
+            $failures += [int]$report.testsuite.failures + [int]$report.testsuite.errors
+            $skipped += [int]$report.testsuite.skipped
+            foreach ($case in $report.testsuite.testcase) {
+              if ($case.failure -or $case.error) {
+                $details = "$($case.classname).$($case.name): $($case.failure.InnerText) $($case.error.InnerText)"
+                $details = $details.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+                Write-Output "::error::$details"
+              }
+            }
+          }
+          if ($reports.Count -eq 0) {
+            Get-Content "$env:RUNNER_TEMP/gradle-desktop.log" -ErrorAction SilentlyContinue |
+              Where-Object { $_ -match '^e:|^error:' } | Select-Object -First 20 | ForEach-Object {
+                $details = $_.Replace('%', '%25')
+                Write-Output "::error::$details"
+              }
+          }
+          if ($reports.Count -gt 0) {
+            $summary = "Editor regression tests: $tests tests, $failures failures, $skipped skipped."
+            Write-Output "::notice::$summary"
+            $summary | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          }
       - name: Install WiX Toolset (for MSI)
         if: success()
         shell: pwsh
@@ -138,7 +169,7 @@ jobs:
             echo
             echo "Built from commit $SHA."
             echo
-            echo "Includes the autosave/focus fixes and NotePad Pro branding: Android launcher/adaptive/themed icons, Windows application/installer icons, and an in-app logo."
+            echo "Includes selection-aware wrapped-line coloring, corrected pasted-list numbering, a movable Find & Replace palette, autosave/focus fixes, and native NotePad Pro icons."
             echo
             echo "Android update warning: export/back up notes before updating. CI debug signing keys can differ between builds, which may block in-place updates. Do not uninstall the old app before backing up; uninstalling removes local notes."
             echo

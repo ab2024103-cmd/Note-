@@ -7,7 +7,7 @@ import com.notepadpro.shared.domain.model.NoteRow
 import com.notepadpro.shared.domain.model.NoteDocument
 import com.notepadpro.shared.editor.EditorSession
 import com.notepadpro.shared.editor.FindMatch
-import com.notepadpro.shared.editor.FindReplaceEngine
+import com.notepadpro.shared.editor.FindReplaceController
 import com.notepadpro.shared.editor.SessionEvent
 import com.notepadpro.shared.platform.currentTimeMillis
 import kotlinx.coroutines.CoroutineScope
@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
@@ -45,6 +46,7 @@ data class AppUiState(
     val sidebarOpen: Boolean = false,
     val findOpen: Boolean = false,
     val replaceMode: Boolean = false,
+    val findFocusRequest: Long = 0,
     val extractOpen: Boolean = false,
     val settingsOpen: Boolean = false,
     val aboutOpen: Boolean = false,
@@ -59,7 +61,8 @@ data class FindUiState(
     val caseSensitive: Boolean = false,
     val matches: List<FindMatch> = emptyList(),
     val currentIndex: Int = 0,
-    val replacedCount: Int = 0
+    val replacedCount: Int = 0,
+    val searching: Boolean = false
 )
 
 /**
@@ -87,15 +90,14 @@ class AppCore(
     private val _ui = MutableStateFlow(AppUiState())
     val ui: StateFlow<AppUiState> = _ui.asStateFlow()
 
-    private val _find = MutableStateFlow(FindUiState())
-    val find: StateFlow<FindUiState> = _find.asStateFlow()
+    private val findController = FindReplaceController(scope)
+    val find: StateFlow<FindUiState> = findController.state
 
     private val _messages = MutableSharedFlow<String>(extraBufferCapacity = 32)
     val messages: SharedFlow<String> = _messages.asSharedFlow()
 
     private var nextTabId: Long = 1L
     private var sessionPersistJob: Job? = null
-    private var findJob: Job? = null
     private var initialized = false
 
     // ------------------------------------------------------------------
@@ -294,8 +296,10 @@ class AppCore(
     fun toggleSidebar() = _ui.update { it.copy(sidebarOpen = !it.sidebarOpen) }
 
     fun setFindOpen(open: Boolean, replaceMode: Boolean = false) {
-        _ui.update { it.copy(findOpen = open, replaceMode = replaceMode) }
-        if (!open) _find.update { it.copy(matches = emptyList(), currentIndex = 0, replacedCount = 0) }
+        _ui.update { it.copy(findOpen = open, replaceMode = replaceMode,
+            findFocusRequest = if (open) it.findFocusRequest + 1 else it.findFocusRequest) }
+        findController.setSession(activeSession)
+        findController.setOpen(open)
     }
 
     fun setExtractOpen(open: Boolean) = _ui.update { it.copy(extractOpen = open) }
@@ -305,11 +309,11 @@ class AppCore(
     fun onBackPressed() {
         val u = _ui.value
         when {
-            u.sidebarOpen && !isWide -> setSidebarOpen(false)
-            u.extractOpen && !isWide -> setExtractOpen(false)
             u.settingsOpen -> setSettingsOpen(false)
             u.aboutOpen -> setAboutOpen(false)
+            u.sidebarOpen && !isWide -> setSidebarOpen(false)
             u.findOpen -> setFindOpen(false)
+            u.extractOpen && !isWide -> setExtractOpen(false)
             else -> Unit
         }
     }
@@ -368,98 +372,13 @@ class AppCore(
     // Find & Replace (applies to active tab)
     // ------------------------------------------------------------------
 
-    @OptIn(FlowPreview::class)
-    fun onFindQueryChanged(q: String) {
-        _find.update { it.copy(query = q, currentIndex = 0) }
-        findJob?.cancel()
-        findJob = scope.launch {
-            kotlinx.coroutines.delay(200)
-            recomputeMatches()
-        }
-    }
-
-    fun onReplaceQueryChanged(q: String) = _find.update { it.copy(replaceQuery = q) }
-    fun onCaseSensitiveChanged(v: Boolean) {
-        _find.update { it.copy(caseSensitive = v) }
-        findJob?.cancel()
-        findJob = scope.launch {
-            kotlinx.coroutines.delay(150)
-            recomputeMatches()
-        }
-    }
-
-    private fun recomputeMatches() {
-        val session = activeSession ?: run {
-            _find.update { it.copy(matches = emptyList(), currentIndex = 0) }
-            return
-        }
-        val f = _find.value
-        val lines = session.state.value.lines
-        val matches = FindReplaceEngine.findAll(lines, f.query, f.caseSensitive)
-        _find.update { it.copy(matches = matches, currentIndex = 0, replacedCount = 0) }
-    }
-
-    fun nextMatch() {
-        val f = _find.value
-        if (f.matches.isEmpty()) return
-        val idx = if (f.currentIndex + 1 >= f.matches.size) 0 else f.currentIndex + 1
-        _find.update { it.copy(currentIndex = idx) }
-    }
-
-    fun prevMatch() {
-        val f = _find.value
-        if (f.matches.isEmpty()) return
-        val idx = if (f.currentIndex - 1 < 0) f.matches.size - 1 else f.currentIndex - 1
-        _find.update { it.copy(currentIndex = idx) }
-    }
-
-    fun replaceCurrent() {
-        val session = activeSession ?: return
-        val f = _find.value
-        if (f.matches.isEmpty()) return
-        val match = f.matches[f.currentIndex]
-        val (newLines, _) = FindReplaceEngine.replaceOne(
-            session.state.value.lines, match, f.replaceQuery, f.caseSensitive
-        )
-        applyFindChange(session, newLines)
-        val newMatches = f.matches.toMutableList().apply {
-            removeAt(f.currentIndex)
-            val offset = f.replaceQuery.length - (match.end - match.start)
-            for (i in f.currentIndex until size) {
-                val m = this[i]
-                if (m.lineId == match.lineId && m.start >= match.end) {
-                    this[i] = m.copy(start = m.start + offset, end = m.end + offset)
-                }
-            }
-        }
-        val nextIdx = if (newMatches.isEmpty()) 0 else f.currentIndex.coerceAtMost(newMatches.size - 1)
-        _find.update {
-            it.copy(
-                matches = newMatches,
-                currentIndex = nextIdx,
-                replacedCount = it.replacedCount + 1
-            )
-        }
-    }
-
-    fun replaceAll() {
-        val session = activeSession ?: return
-        val f = _find.value
-        if (f.matches.isEmpty()) return
-        val (newLines, count) = FindReplaceEngine.replaceAll(
-            session.state.value.lines, f.query, f.replaceQuery, f.caseSensitive
-        )
-        applyFindChange(session, newLines)
-        _find.update {
-            it.copy(matches = emptyList(), currentIndex = 0, replacedCount = it.replacedCount + count)
-        }
-    }
-
-    private fun applyFindChange(session: EditorSession, lines: List<com.notepadpro.shared.domain.model.EditorLine>) {
-        // Rebuild the document text through the session's text pipeline so
-        // undo/autosave semantics stay intact.
-        session.replaceAllLinesExternal(lines)
-    }
+    fun onFindQueryChanged(q: String) = findController.setQuery(q)
+    fun onReplaceQueryChanged(q: String) = findController.setReplacement(q)
+    fun onCaseSensitiveChanged(v: Boolean) = findController.setCaseSensitive(v)
+    fun nextMatch() = findController.next()
+    fun prevMatch() = findController.previous()
+    fun replaceCurrent() = findController.replaceCurrent()
+    fun replaceAll() = findController.replaceAll()
 
     // ------------------------------------------------------------------
     // Session persistence / shutdown
@@ -499,5 +418,13 @@ class AppCore(
 
     init {
         ensureSearchCollector()
+        scope.launch {
+            combine(_tabs, _activeTabId, _ui.map { it.findOpen }.distinctUntilChanged()) { tabs, id, open ->
+                tabs.firstOrNull { it.localId == id }?.session to open
+            }.distinctUntilChanged().collect { (session, open) ->
+                findController.setSession(session)
+                findController.setOpen(open)
+            }
+        }
     }
 }

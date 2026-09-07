@@ -1,12 +1,10 @@
 package com.notepadpro.shared.editor
 
 import com.notepadpro.shared.domain.model.EditorLine
+import com.notepadpro.shared.domain.model.InlineSpan
+import com.notepadpro.shared.domain.model.TextCodec
 
-/**
- * Find & Replace over the line model. Plain-text search, one line at a time
- * (matches never span lines), so results map 1:1 onto editor lines and
- * scrolling/highlighting stays trivial and cheap.
- */
+/** Literal, non-overlapping matches in original-text coordinates. End is exclusive. */
 data class FindMatch(
     val lineId: String,
     val lineIndex: Int,
@@ -16,100 +14,77 @@ data class FindMatch(
 )
 
 object FindReplaceEngine {
-
     fun findAll(lines: List<EditorLine>, query: String, caseSensitive: Boolean): List<FindMatch> {
         if (query.isEmpty()) return emptyList()
-        val q = if (caseSensitive) query else query.lowercase()
         val result = ArrayList<FindMatch>()
-        var index = 0
-        for (line in lines) {
+        for ((index, line) in lines.withIndex()) {
             val text = line.plainText
-            if (text.isNotEmpty()) {
-                val hay = if (caseSensitive) text else text.lowercase()
-                var from = 0
-                while (true) {
-                    val hit = hay.indexOf(q, from)
-                    if (hit < 0) break
-                    result.add(FindMatch(line.id, index, hit, hit + q.length, text))
-                    from = hit + q.length
-                    if (from >= hay.length) break
-                }
+            var from = 0
+            while (from <= text.length - query.length) {
+                // Lowercasing entire strings can change Unicode string lengths
+                // and corrupt offsets. Search the original text instead.
+                val hit = text.indexOf(query, from, ignoreCase = !caseSensitive)
+                if (hit < 0) break
+                result.add(FindMatch(line.id, index, hit, hit + query.length, text))
+                from = hit + query.length
             }
-            index++
         }
         return result
     }
 
-    /**
-     * Replaces the given single match inside [lines], returning the new line
-     * list plus the caret position of the replacement in that line.
-     */
+    /** Never apply a stale match to a different row or an edited text snapshot. */
     fun replaceOne(
         lines: List<EditorLine>,
         match: FindMatch,
-        replacement: String,
-        caseSensitive: Boolean
+        replacement: String
     ): Pair<List<EditorLine>, Int> {
         val line = lines.getOrNull(match.lineIndex) ?: return lines to 0
         val text = line.plainText
-        if (match.start < 0 || match.end > text.length) return lines to 0
-        val newText = text.substring(0, match.start) + replacement + text.substring(match.end)
-        val newSpans = remapSpansForEdit(
-            line.spans, text, newText,
-            commonPrefixLen(text, newText), commonSuffixLen(text, newText)
-        )
-        val newLine = line.copy(spans = newSpans)
+        if (line.id != match.lineId || text != match.lineText ||
+            match.start < 0 || match.end <= match.start || match.end > text.length
+        ) return lines to 0
+        val normalized = TextCodec.normalizeLineEndings(replacement)
+        val (before, _, after) = clipSpans(line.spans, match.start, match.end)
+        val spans = before + listOf(replacementSpan(line, match.start, match.end, normalized)) + after
+        val replacementLines = splitRichLines(line, spans)
         val out = lines.toMutableList()
-        out[match.lineIndex] = newLine
-        return out to (match.start + replacement.length)
+        out.removeAt(match.lineIndex)
+        out.addAll(match.lineIndex, replacementLines)
+        val caret = if ('\n' in normalized) normalized.substringAfterLast('\n').length else match.start + normalized.length
+        return out to caret
     }
 
-    /** Replaces every match, returns the new lines and the number replaced. */
+    /** Replace the original matches once; preserve formatting outside each hit. */
     fun replaceAll(
         lines: List<EditorLine>,
         query: String,
         replacement: String,
         caseSensitive: Boolean
     ): Pair<List<EditorLine>, Int> {
-        val q = if (caseSensitive) query else query.lowercase()
+        if (query.isEmpty()) return lines to 0
+        val normalized = TextCodec.normalizeLineEndings(replacement)
+        val out = ArrayList<EditorLine>(lines.size)
         var replaced = 0
-        val out = lines.toMutableList()
-        for (i in out.indices) {
-            val line = out[i]
+        for (line in lines) {
             val text = line.plainText
-            if (text.isEmpty() || q.isEmpty()) continue
-            val h = if (caseSensitive) text else text.lowercase()
-
-            // Count matches first so we can skip untouched lines cheaply.
-            var found = 0
-            var pos = 0
-            while (true) {
-                val hit = h.indexOf(q, pos)
-                if (hit < 0) break
-                found++
-                pos = hit + q.length
-            }
-            if (found == 0) continue
-
-            val builder = StringBuilder(text.length + replacement.length * found)
+            val spans = ArrayList<InlineSpan>()
             var cursor = 0
-            var searchFrom = 0
-            while (true) {
-                val hit = h.indexOf(q, searchFrom)
+            var hits = 0
+            while (cursor <= text.length - query.length) {
+                val hit = text.indexOf(query, cursor, ignoreCase = !caseSensitive)
                 if (hit < 0) break
-                builder.append(text, cursor, hit)
-                builder.append(replacement)
-                cursor = hit + q.length
-                searchFrom = cursor
+                spans.addAll(clipSpans(line.spans, cursor, hit).second)
+                if (normalized.isNotEmpty()) spans.add(replacementSpan(line, hit, hit + query.length, normalized))
+                cursor = hit + query.length
+                hits++
             }
-            builder.append(text, cursor, text.length)
-            val newText = builder.toString()
-            replaced += found
-            val newSpans = remapSpansForEdit(
-                line.spans, text, newText,
-                commonPrefixLen(text, newText), commonSuffixLen(text, newText)
-            )
-            out[i] = line.copy(spans = newSpans)
+            if (hits == 0) {
+                out.add(line)
+            } else {
+                spans.addAll(clipSpans(line.spans, cursor, text.length).second)
+                out.addAll(splitRichLines(line, spans))
+                replaced += hits
+            }
         }
         return out to replaced
     }

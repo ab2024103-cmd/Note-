@@ -1,14 +1,18 @@
 package com.notepadpro.shared.ui.screens
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.MaterialTheme
@@ -35,6 +39,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextDecoration
@@ -49,10 +54,11 @@ import com.notepadpro.shared.ui.theme.Markers
  * Builds the annotated text of one line: inline-highlight backgrounds,
  * find-match overlays and checked strike-through, in one [AnnotatedString].
  */
-private fun buildLineAnnotation(
+internal fun buildLineAnnotation(
     line: EditorLine,
     findRanges: List<IntRange>,
-    findColor: Color
+    findColor: Color,
+    currentFindRange: IntRange? = null
 ): AnnotatedString {
     val text = line.plainText
     if (text.isEmpty()) return AnnotatedString("")
@@ -91,13 +97,15 @@ private fun buildLineAnnotation(
     // 3) find matches (added last: they paint on top of highlights)
     val len = text.length
     for (range in findRanges) {
+        if (range.isEmpty()) continue
         val s = range.first.coerceIn(0, len)
-        val e = range.last.coerceIn(s, len)
+        val e = (range.last + 1).coerceIn(s, len)
         if (e > s) {
             styles.add(
                 AnnotatedString.Range(
                     item = SpanStyle(
-                        background = findColor,
+                        background = if (range == currentFindRange) Color(0xFFFFB74D) else findColor,
+                        color = Color.Black,
                         textDecoration = TextDecoration.Underline
                     ),
                     start = s,
@@ -118,6 +126,7 @@ private fun buildLineAnnotation(
  * imports, splits/merges) are synced by comparing row text to the model in
  * a LaunchedEffect keyed on [EditorLine.plainText].
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun EditorLineRow(
     line: EditorLine,
@@ -136,14 +145,16 @@ internal fun EditorLineRow(
     onRowFocused: (lineId: String) -> Unit,
     onToggleCheck: (lineId: String) -> Unit,
     onSelectLine: (lineId: String) -> Unit,
-    onCaretApplied: () -> Unit
+    onCaretApplied: () -> Unit,
+    onVisualLineChanged: (String, Int, Int) -> Unit = { _, _, _ -> },
+    currentFindRange: IntRange? = null
 ) {
     val textColor = MaterialTheme.colors.onBackground
     val lineText = line.plainText
 
     var tfv by remember(line.id) {
         mutableStateOf(
-            TextFieldValue(buildLineAnnotation(line, findRanges, findColor))
+            TextFieldValue(buildLineAnnotation(line, findRanges, findColor, currentFindRange))
         )
     }
 
@@ -153,33 +164,59 @@ internal fun EditorLineRow(
         onDispose { unregisterFocus(line.id) }
     }
 
-    /**
-     * External model change sync (undo / replace-all / mark / split / merge
-     * / find results). Only applied when the decorated text actually differs,
-     * so plain typing (which updates tfv first) never jumps the caret.
-     */
-    LaunchedEffect(line.plainText, line.spans, line.checked, findRanges, findColor) {
-        val expected: AnnotatedString = buildLineAnnotation(line, findRanges, findColor)
-        // Compare plain/decorated text structurally without depending on the
-        // exact TextFieldValue.text type (String vs AnnotatedString).
-        val currentText: String = tfv.text.toString()
-        if (currentText != expected.toString()) {
-            val selMin = (caretToApply?.min ?: tfv.selection.min).coerceIn(0, lineText.length)
-            tfv = TextFieldValue(expected, TextRange(selMin))
+    var textLayout by remember(line.id) { mutableStateOf<TextLayoutResult?>(null) }
+    val matchIntoView = remember(line.id) { BringIntoViewRequester() }
+    LaunchedEffect(currentFindRange, textLayout) {
+        val range = currentFindRange ?: return@LaunchedEffect
+        val layout = textLayout ?: return@LaunchedEffect
+        if (range.isEmpty() || layout.layoutInput.text.text != lineText || lineText.isEmpty()) return@LaunchedEffect
+        matchIntoView.bringIntoView(layout.getBoundingBox(range.first.coerceIn(0, lineText.lastIndex)))
+    }
+
+    fun reportVisualLine() {
+        val layout = textLayout ?: return
+        if (layout.layoutInput.text.text != tfv.text) return
+        val row = layout.getLineForOffset(tfv.selection.end.coerceIn(0, tfv.text.length))
+        onVisualLineChanged(line.id, layout.getLineStart(row), layout.getLineEnd(row))
+    }
+
+    // Compare full annotations, not toString(): the latter discards colors and
+    // makes formatting-only changes (including Find matches) invisible.
+    val expected = remember(line, findRanges, findColor, currentFindRange) {
+        buildLineAnnotation(line, findRanges, findColor, currentFindRange)
+    }
+    LaunchedEffect(line.id, expected) {
+        if (tfv.annotatedString != expected) {
+            tfv = if (tfv.text == lineText) {
+                tfv.copy(annotatedString = expected) // preserve selection and IME composition
+            } else {
+                val caret = caretToApply
+                TextFieldValue(expected, TextRange(
+                    (caret?.start ?: tfv.selection.start).coerceIn(0, lineText.length),
+                    (caret?.end ?: tfv.selection.end).coerceIn(0, lineText.length)
+                ))
+            }
         }
+    }
+    LaunchedEffect(tfv.selection, textLayout, isActiveRow) {
+        if (isActiveRow) reportVisualLine()
     }
 
     // Keyboard-driven focus request for this row (arrow moves, Enter, undo...).
     LaunchedEffect(line.id, focusRequester, caretToApply) {
         val caret = caretToApply ?: return@LaunchedEffect
-        tfv = tfv.copy(selection = TextRange(caret.min.coerceIn(0, lineText.length)))
+        tfv = tfv.copy(selection = TextRange(
+            caret.start.coerceIn(0, lineText.length), caret.end.coerceIn(0, lineText.length)
+        ))
         focusRequester.requestFocus()
         onCaretApplied()
     }
 
     fun applyCaretIfPending() {
         val caret = caretToApply ?: return
-        tfv = tfv.copy(selection = TextRange(caret.min.coerceIn(0, lineText.length)))
+        tfv = tfv.copy(selection = TextRange(
+            caret.start.coerceIn(0, lineText.length), caret.end.coerceIn(0, lineText.length)
+        ))
     }
 
     val wash = line.lineColor?.let { Markers.lineWash(it, darkTheme) }
@@ -203,7 +240,8 @@ internal fun EditorLineRow(
         // -------- list glyph gutter (also the "select line" handle) --------
         Box(
             modifier = Modifier
-                .width(36.dp)
+                .width((maxOf(36f, ((number?.toString()?.length ?: 1) + 1) * fontSizeSp * 0.65f) + line.indent.coerceAtLeast(0) * 14).dp)
+                .heightIn(min = (fontSizeSp * 1.5f).dp)
                 .pointerInput(line.id) {
                     detectTapGestures { _ ->
                         when (line.listType) {
@@ -224,8 +262,8 @@ internal fun EditorLineRow(
                         modifier = Modifier.padding(start = indentPad)
                     )
                 }
-                ListType.NUMBER -> Text(
-                    "${number ?: 1}.",
+                ListType.NUMBER -> if (number != null) Text(
+                    "$number.",
                     color = MaterialTheme.colors.primary,
                     fontSize = (fontSizeSp - 1).sp,
                     modifier = Modifier.padding(start = indentPad)
@@ -242,22 +280,29 @@ internal fun EditorLineRow(
             value = tfv,
             onValueChange = { newValue ->
                 tfv = newValue
-                onTextChange(line.id, newValue.text, newValue.selection.min, newValue.selection.max)
+                onTextChange(line.id, newValue.text, newValue.selection.start, newValue.selection.end)
+                reportVisualLine()
             },
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
+                .bringIntoViewRequester(matchIntoView)
                 .focusRequester(focusRequester)
                 .onFocusChanged { f ->
                     if (f.isFocused) {
                         applyCaretIfPending()
                         onRowFocused(line.id)
+                        reportVisualLine()
                     }
                 },
             textStyle = TextStyle(
                 fontSize = fontSizeSp.sp,
                 color = textColor
             ),
+            onTextLayout = { layout ->
+                textLayout = layout
+                reportVisualLine()
+            },
             singleLine = !wordWrap,
             keyboardOptions = KeyboardOptions(autoCorrect = true),
             cursorBrush = SolidColor(if (isActiveRow) MaterialTheme.colors.primary else textColor)

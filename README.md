@@ -36,9 +36,12 @@ Checksums: [CHECKSUMS.md5](https://github.com/ab2024103-cmd/Note-/releases/downl
 
 - **Notes sidebar** with search, pinning (★) and delete; auto-refreshes from the DB
 - **Multi-tab editing** with session restore across restarts
-- **Rich line editor**: whole-line background colors, inline highlights (six colors),
-  bullet / numbered / checklist lists with indent & outdent
-- **Find & Replace** panel (case-sensitive, next/prev, replace one/all)
+- **Rich editor**: Color paints selected text or the current wrapped display line;
+  whole-paragraph backgrounds remain an explicit action. Six highlight colors,
+  bullet / numbered / checklist lists with indent & outdent; blank pasted separators
+  don't restart numbering or gain spurious list markers.
+- **Floating Find & Replace** palette: draggable, with match count, Match case,
+  previous/next, Replace and All. Results update after edits and undo/redo.
 - **Extract by color** panel with copy-to-clipboard output
 - **Autosave** (debounced) into SQLite; plain-text file import/export (Open/Save/Save As)
 - **Status bar**: save state (Ready/Autosaving/Saving/Saved), word count, Ln/Col, zoom
@@ -51,7 +54,7 @@ Checksums: [CHECKSUMS.md5](https://github.com/ab2024103-cmd/Note-/releases/downl
 | -------- | ------ |
 | Ctrl+N / Ctrl+O | New note / Open file |
 | Ctrl+S / Ctrl+Shift+S | Save / Save As |
-| Ctrl+F / Ctrl+H | Find / Replace |
+| Ctrl+F / Ctrl+H | Open Find & Replace (focus Find / Replace with) |
 | Ctrl+B | Toggle sidebar |
 | Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) | Undo / Redo |
 | Ctrl+Shift+8 / 7 / 9 | Bullet / Numbered / Checklist list |
@@ -69,8 +72,8 @@ Prerequisites: JDK 17, Android SDK 34 (for the APK).
 ./gradlew :androidApp:assembleRelease
 ```
 
-Run the shared editor regression tests (autosave/cancellation and Compose focus)
-on the desktop JVM target:
+Run the shared editor regression tests (autosave, wrapped selection coloring,
+paste/list numbering, Find & Replace, and Compose UI) on the desktop JVM target:
 
 ```bash
 ./gradlew :shared:desktopTest

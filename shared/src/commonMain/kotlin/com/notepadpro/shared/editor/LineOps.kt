@@ -16,13 +16,14 @@ import com.notepadpro.shared.platform.randomLineId
 fun splitLineAt(line: EditorLine, pos: Int): Pair<EditorLine, EditorLine> {
     val text = line.plainText
     val p = pos.coerceIn(0, text.length)
-    val (left, right) = clipSpans(line.spans, p, p)
+    val (left, _, right) = clipSpans(line.spans, p, p)
     return line.copy(
         spans = dropEmpty(left),
         id = line.id
     ) to line.copy(
         id = randomLineId(),
-        spans = dropEmpty(right)
+        spans = dropEmpty(right),
+        checked = false
     )
 }
 
@@ -171,44 +172,33 @@ fun setChecked(line: EditorLine, checked: Boolean): EditorLine =
     if (line.listType != ListType.CHECK) line else line.copy(checked = checked)
 
 /**
- * Recomputes the display numbers for NUMBER list lines.
- * A fresh numbering run starts whenever the list context is interrupted
- * (non-number line, or indent level change); nested runs restart at 1.
+ * Number real items continuously across blank separators. Nested lists get
+ * their own counters, and returning to a parent resumes its sequence. Only an
+ * active empty numbered row is shown as a new-item placeholder.
  */
-fun computeNumbers(lines: List<EditorLine>): Map<String, Int> {
+fun computeNumbers(lines: List<EditorLine>, activeLineId: String? = null): Map<String, Int> {
     val out = HashMap<String, Int>()
     val counters = HashMap<Int, Int>()
-    var lastNumbered = false
-    var lastIndent = -1
     for (line in lines) {
-        if (line.listType == ListType.NUMBER && line.plainText.isNotBlank()) {
-            val i = line.indent
-            if (lastNumbered && lastIndent == i) {
-                counters[i] = counters.getOrDefault(i, 0) + 1
-            } else {
-                counters.clear()
-                counters[i] = 1
-            }
-            out[line.id] = counters[i]!!
-            lastNumbered = true
-            lastIndent = i
+        if (line.plainText.isBlank() && (line.id != activeLineId || line.listType != ListType.NUMBER)) continue
+        val indent = line.indent.coerceAtLeast(0)
+        if (line.listType == ListType.NUMBER) {
+            counters.keys.filter { it > indent }.forEach { counters.remove(it) }
+            val number = (counters[indent] ?: 0) + 1
+            counters[indent] = number
+            out[line.id] = number
+        } else if (line.listType == ListType.NONE) {
+            counters.clear()
         } else {
-            lastNumbered = false
+            // A nested bullet/check list doesn't restart its numbered parent.
+            counters.keys.filter { it >= indent }.forEach { counters.remove(it) }
         }
     }
     return out
 }
 
 /** Total plain characters of a document (used by word count). */
-fun docText(lines: List<EditorLine>): String {
-    if (lines.isEmpty()) return ""
-    val sb = StringBuilder()
-    for (line in lines) {
-        if (sb.isNotEmpty()) sb.append('\n')
-        sb.append(line.plainText)
-    }
-    return sb.toString()
-}
+fun docText(lines: List<EditorLine>): String = lines.joinToString("\n") { it.plainText }
 
 fun countWords(text: String): Int {
     if (text.isBlank()) return 0

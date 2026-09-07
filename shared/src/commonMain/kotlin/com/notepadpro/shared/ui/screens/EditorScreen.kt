@@ -27,7 +27,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.Checkbox
 import androidx.compose.material.CheckboxDefaults
 import androidx.compose.material.Divider
@@ -49,10 +48,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -93,13 +90,10 @@ fun EditorScreen(
     val findState by core.find.collectAsState()
     val uiState by core.ui.collectAsState()
 
-    val findColor = if (darkTheme) Color(0x80BF360C) else Color(0x80FF8A80)
+    val findColor = Color(0xFFFFE8A3)
 
     Column(modifier = modifier.fillMaxSize()) {
         EditorToolbar(core, session, docState, darkTheme)
-        if (uiState.findOpen) {
-            FindReplacePanel(core, session, findState, darkTheme)
-        }
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             EditorLines(
                 core = core,
@@ -113,6 +107,22 @@ fun EditorScreen(
             )
             if (uiState.extractOpen) {
                 ExtractOverlay(core, session, docState, reduceMotion = prefs.reduceMotion)
+            }
+            if (uiState.findOpen) {
+                FloatingFindReplacePanel(
+                    state = findState,
+                    darkTheme = darkTheme,
+                    focusReplacement = uiState.replaceMode,
+                    focusRequest = uiState.findFocusRequest,
+                    onQuery = core::onFindQueryChanged,
+                    onReplacement = core::onReplaceQueryChanged,
+                    onMatchCase = core::onCaseSensitiveChanged,
+                    onPrevious = core::prevMatch,
+                    onNext = core::nextMatch,
+                    onReplace = core::replaceCurrent,
+                    onReplaceAll = core::replaceAll,
+                    onClose = { core.setFindOpen(false) }
+                )
             }
         }
         StatusBar(docState = docState, saveStatus = saveStatus, fontSp = prefs.fontSizeSp, darkTheme = darkTheme)
@@ -167,10 +177,16 @@ private fun EditorToolbar(core: AppCore, session: EditorSession, docState: DocSt
                 MenuItemAction({ colorMenu = false; session.clearInlineSelection() }, "Remove inline highlight", null)
                 Divider()
                 for (c in HighlightColor.entries) {
-                    MenuItemColor({ colorMenu = false; session.setLineColor(c) }, c, darkTheme, "Line color ${c.display}")
+                    MenuItemColor({ colorMenu = false; session.setLineColor(c) }, c, darkTheme, "${c.display} — selection / current line")
                 }
                 Divider()
-                MenuItemAction({ colorMenu = false; session.setLineColor(null) }, "Clear line color", null)
+                MenuItemAction({ colorMenu = false; session.setLineColor(null) }, "Clear selection / current line color", null)
+                Divider()
+                Text("Entire paragraph", fontSize = 11.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+                for (c in HighlightColor.entries) {
+                    MenuItemColor({ colorMenu = false; session.setParagraphColor(c) }, c, darkTheme, "Paragraph ${c.display}")
+                }
+                MenuItemAction({ colorMenu = false; session.setParagraphColor(null) }, "Clear paragraph background", null)
             }
             ToolDrop("Mark", markMenu, { markMenu = true }, { markMenu = false }) {
                 for (c in HighlightColor.entries) {
@@ -257,124 +273,6 @@ private fun VDivider() {
             .height(18.dp)
             .background(MaterialTheme.colors.onSurface.copy(alpha = 0.12f))
     )
-}
-
-// ---------------------------------------------------------------------------
-// Find & Replace panel
-// ---------------------------------------------------------------------------
-
-@Composable
-private fun FindReplacePanel(core: AppCore, session: EditorSession, findState: FindUiState, darkTheme: Boolean) {
-    val uiState by core.ui.collectAsState()
-    val findBg = if (darkTheme) Color(0xFF222222) else Color(0xFFF7F7F7)
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(findBg)
-            .padding(horizontal = 8.dp, vertical = 4.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Label("Find")
-            Spacer(Modifier.width(6.dp))
-            SearchField(
-                value = findState.query,
-                placeholder = "Search…",
-                onValue = { core.onFindQueryChanged(it) },
-                onEnter = { core.nextMatch() },
-                onShiftEnter = { core.prevMatch() },
-                modifier = Modifier.weight(1f)
-            )
-            Spacer(Modifier.width(6.dp))
-            ToolButton(if (findState.caseSensitive) "Aa" else "aa") {
-                core.onCaseSensitiveChanged(!findState.caseSensitive)
-            }
-            ToolButton("‹", enabled = findState.matches.isNotEmpty()) { core.prevMatch() }
-            ToolButton("›", enabled = findState.matches.isNotEmpty()) { core.nextMatch() }
-            Text(
-                text = when {
-                    findState.query.isEmpty() -> ""
-                    findState.matches.isEmpty() -> "0"
-                    else -> "${findState.currentIndex + 1}/${findState.matches.size}"
-                },
-                fontSize = 12.sp,
-                color = MaterialTheme.colors.onSurface.copy(alpha = 0.8f),
-                modifier = Modifier.padding(horizontal = 4.dp)
-            )
-            ToolButton("✕") { core.setFindOpen(false) }
-        }
-        if (uiState.replaceMode) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 2.dp)) {
-                Label("Rep")
-                Spacer(Modifier.width(4.dp))
-                SearchField(
-                    value = findState.replaceQuery,
-                    placeholder = "Replacement…",
-                    onValue = { core.onReplaceQueryChanged(it) },
-                    onEnter = { core.replaceCurrent() },
-                    onShiftEnter = { core.replaceAll() },
-                    modifier = Modifier.weight(1f)
-                )
-                Spacer(Modifier.width(6.dp))
-                ToolButton("One", enabled = findState.matches.isNotEmpty()) { core.replaceCurrent() }
-                ToolButton("All", enabled = findState.matches.isNotEmpty()) { core.replaceAll() }
-                if (findState.replacedCount > 0) {
-                    Text(
-                        "Replaced ${findState.replacedCount}",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colors.onSurface.copy(alpha = 0.7f),
-                        modifier = Modifier.padding(horizontal = 4.dp)
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun Label(text: String) {
-    Text(text, fontSize = 12.sp, color = MaterialTheme.colors.onSurface.copy(alpha = 0.65f))
-}
-
-@Composable
-private fun SearchField(
-    value: String,
-    placeholder: String,
-    onValue: (String) -> Unit,
-    onEnter: () -> Unit,
-    onShiftEnter: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var tfv by remember { mutableStateOf(TextFieldValue(value)) }
-    LaunchedEffect(value) {
-        if (tfv.text != value) tfv = TextFieldValue(value)
-    }
-    PlatformKeyScope(enabled = true, onKey = { ev ->
-        if (ev.ctrl || ev.alt || !ev.isDown) return@PlatformKeyScope false
-        when (ev.key) {
-            CommonKey.ENTER -> {
-                if (ev.shift) onShiftEnter() else onEnter()
-                true
-            }
-            else -> false
-        }
-    }) {
-        Box(modifier = modifier) {
-            BasicTextField(
-                value = tfv,
-                onValueChange = { nv ->
-                    tfv = nv
-                    onValue(nv.text)
-                },
-                modifier = Modifier.fillMaxWidth(),
-                textStyle = MaterialTheme.typography.body2.copy(fontSize = 13.sp),
-                singleLine = true,
-                cursorBrush = SolidColor(MaterialTheme.colors.primary)
-            )
-            if (value.isEmpty()) {
-                Text(placeholder, fontSize = 13.sp, color = MaterialTheme.colors.onSurface.copy(alpha = 0.35f))
-            }
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -557,7 +455,7 @@ private fun EditorLines(
         val m = findState.matches.getOrNull(findState.currentIndex) ?: return@LaunchedEffect
         val idx = m.lineIndex.coerceIn(0, (docState.lines.size - 1).coerceAtLeast(0))
         if (docState.lines.getOrNull(idx)?.id == m.lineId) {
-            listState.animateScrollToItem(idx)
+            listState.scrollToItem(idx)
         }
     }
 
@@ -577,7 +475,7 @@ private fun EditorLines(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .onFocusChanged { linesFocused = it.isFocused }
+                .onFocusChanged { linesFocused = it.hasFocus }
         ) {
             if (docState.lines.all { it.isEmptyLine }) {
                 Text(
@@ -624,7 +522,10 @@ private fun EditorLines(
                         },
                         onToggleCheck = { id -> session.toggleChecked(id) },
                         onSelectLine = { id -> session.selectSingleLine(id) },
-                        onCaretApplied = { pendingCaret = null }
+                        onCaretApplied = { pendingCaret = null },
+                        onVisualLineChanged = session::onVisualLineChanged,
+                        currentFindRange = findState.matches.getOrNull(findState.currentIndex)
+                            ?.takeIf { it.lineId == line.id }?.let { it.start until it.end }
                     )
                 }
             }
@@ -656,8 +557,8 @@ private fun handleEditorKey(session: EditorSession, doc: DocState, ev: PlatformK
                 session.mergeWithNext(activeId)
             } else false
         }
-        CommonKey.ARROW_UP -> return session.moveActiveLine(-1, extend = ev.shift)
-        CommonKey.ARROW_DOWN -> return session.moveActiveLine(+1, extend = ev.shift)
+        CommonKey.ARROW_UP -> return session.canMoveToAdjacentParagraph(-1) && session.moveActiveLine(-1, extend = ev.shift)
+        CommonKey.ARROW_DOWN -> return session.canMoveToAdjacentParagraph(+1) && session.moveActiveLine(+1, extend = ev.shift)
         CommonKey.TAB -> {
             if (activeLine.listType != ListType.NONE) {
                 session.indentLines(if (ev.shift) -1 else +1)
