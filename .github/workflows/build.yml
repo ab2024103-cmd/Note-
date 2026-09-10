@@ -73,34 +73,7 @@ jobs:
       - name: Report editor regression tests
         if: always()
         shell: pwsh
-        run: |
-          $reports = @(Get-ChildItem "shared/build/test-results/desktopTest/TEST-*.xml" -ErrorAction SilentlyContinue)
-          $tests = 0; $failures = 0; $skipped = 0
-          foreach ($file in $reports) {
-            [xml]$report = Get-Content -Raw $file.FullName
-            $tests += [int]$report.testsuite.tests
-            $failures += [int]$report.testsuite.failures + [int]$report.testsuite.errors
-            $skipped += [int]$report.testsuite.skipped
-            foreach ($case in $report.testsuite.testcase) {
-              if ($case.failure -or $case.error) {
-                $details = "$($case.classname).$($case.name): $($case.failure.InnerText) $($case.error.InnerText)"
-                $details = $details.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
-                Write-Output "::error::$details"
-              }
-            }
-          }
-          if ($reports.Count -eq 0) {
-            Get-Content "$env:RUNNER_TEMP/gradle-desktop.log" -ErrorAction SilentlyContinue |
-              Where-Object { $_ -match '^e:|^error:' } | Select-Object -First 20 | ForEach-Object {
-                $details = $_.Replace('%', '%25')
-                Write-Output "::error::$details"
-              }
-          }
-          if ($reports.Count -gt 0) {
-            $summary = "Editor regression tests: $tests tests, $failures failures, $skipped skipped."
-            Write-Output "::notice::$summary"
-            $summary | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
-          }
+        run: python tools/report_tests.py shared/build/test-results/desktopTest --log "$env:RUNNER_TEMP/gradle-desktop.log"
       - name: Install WiX Toolset (for MSI)
         if: success()
         shell: pwsh
@@ -142,11 +115,51 @@ jobs:
             desktopApp/build/compose/binaries/main/exe/*.exe
           if-no-files-found: error
 
+  android-ui:
+    name: Android API 23 editor UI tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+          cache: gradle
+      - name: Enable emulator hardware acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Test the mobile editor on Android 6
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 23
+          target: default
+          arch: x86_64
+          profile: Nexus 5
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: bash tools/run_android_ui_tests.sh
+      - name: Report Android UI regression tests
+        if: always()
+        run: python3 tools/report_tests.py shared/build/outputs/androidTest-results/connected --log "$RUNNER_TEMP/gradle-android-ui.log" --label "Android API 23 UI tests"
+      - name: Upload Android UI test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-ui-test-results
+          path: |
+            shared/build/outputs/androidTest-results/**
+            shared/build/reports/androidTests/**
+            ${{ runner.temp }}/gradle-android-ui.log
+          if-no-files-found: warn
+
   publish-binaries:
     name: Publish binaries to GitHub Release
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [android, desktop-windows]
+    needs: [android, desktop-windows, android-ui]
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -169,7 +182,7 @@ jobs:
             echo
             echo "Built from commit $SHA."
             echo
-            echo "Includes selection-aware wrapped-line coloring, corrected pasted-list numbering, a movable Find & Replace palette, autosave/focus fixes, and native NotePad Pro icons."
+            echo "Includes accurate wrapped display-line counts alongside original text-line counts, extraction of only the highlighted text, and a read-only reading mode on Android and Windows. Also retains the selection/paste fixes, floating Find & Replace, autosave fixes, and native icons."
             echo
             echo "Android update warning: export/back up notes before updating. CI debug signing keys can differ between builds, which may block in-place updates. Do not uninstall the old app before backing up; uninstalling removes local notes."
             echo

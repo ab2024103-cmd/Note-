@@ -50,6 +50,10 @@ fun SettingsDialog(core: AppCore, prefs: UiPrefs) {
                     Text("Word wrap", fontSize = 13.sp)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = prefs.readingMode, onCheckedChange = { core.setReadingMode(it) })
+                    Text("Reading mode (read-only)", fontSize = 13.sp)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = prefs.reduceMotion, onCheckedChange = { core.setReduceMotion(it) })
                     Text("Reduce motion (no panel slide/fade)", fontSize = 13.sp)
                 }

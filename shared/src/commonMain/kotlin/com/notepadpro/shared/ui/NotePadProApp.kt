@@ -305,6 +305,11 @@ private fun dispatchAppShortcut(core: AppCore, ev: PlatformKeyEvent): Boolean {
         CommonKey.F -> { core.setFindOpen(true, ev.shift); return true }
         CommonKey.H -> { core.setFindOpen(true, true); return true }
         CommonKey.B -> { core.toggleSidebar(); return true }
+        CommonKey.R -> {
+            if (!ev.shift) return false
+            core.setReadingMode(!core.prefs.value.readingMode)
+            return true
+        }
         CommonKey.Z -> {
             if (ev.shift) session.redo() else session.undo()
             return true

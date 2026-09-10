@@ -40,9 +40,20 @@ kotlin {
             implementation(libs.multiplatform.settings.test)
         }
         val desktopTest by getting {
+            kotlin.srcDir("src/editorUiTest/kotlin")
             dependencies {
                 implementation(compose.desktop.uiTestJUnit4)
                 implementation(compose.desktop.currentOs)
+            }
+        }
+        val androidInstrumentedTest by getting {
+            kotlin.srcDir("src/editorUiTest/kotlin")
+            dependencies {
+                implementation(libs.androidx.ui.test.junit4)
+                implementation(libs.androidx.test.runner)
+                implementation(libs.androidx.test.junit)
+                implementation(libs.kotlin.test)
+                implementation(libs.multiplatform.settings.test)
             }
         }
         val desktopMain by getting {
@@ -71,6 +82,7 @@ android {
     compileSdk = 34
     defaultConfig {
         minSdk = 21
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -84,4 +96,9 @@ sqldelight {
             packageName.set("com.notepadpro.shared.data.db")
         }
     }
+}
+
+// Host activity for Compose instrumentation tests; never included in release builds.
+dependencies {
+    add("debugImplementation", libs.androidx.ui.test.manifest)
 }

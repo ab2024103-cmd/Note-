@@ -123,7 +123,7 @@ class FindReplaceController(
     fun replaceCurrent() {
         val target = session ?: return
         val state = _state.value
-        if (!open || state.searching) return
+        if (target.isReadOnly || !open || state.searching) return
         val match = state.matches.getOrNull(state.currentIndex) ?: return
         val snapshot = target.state.value
         if (snapshot.version != matchedVersion) {
@@ -144,7 +144,7 @@ class FindReplaceController(
     fun replaceAll() {
         val target = session ?: return
         val state = _state.value
-        if (!open || state.searching || state.matches.isEmpty()) return
+        if (target.isReadOnly || !open || state.searching || state.matches.isEmpty()) return
         val snapshot = target.state.value
         if (snapshot.version != matchedVersion) {
             refresh()

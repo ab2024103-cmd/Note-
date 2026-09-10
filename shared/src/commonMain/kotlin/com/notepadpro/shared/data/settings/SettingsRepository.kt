@@ -16,6 +16,7 @@ class SettingsRepository(private val settings: Settings, private val json: Json)
     private object Keys {
         const val THEME = "theme"
         const val WORD_WRAP = "word_wrap"
+        const val READING_MODE = "reading_mode"
         const val FONT_SIZE = "font_size_sp"
         const val REDUCE_MOTION = "reduce_motion"
         const val RECENT_FILES = "recent_files"
@@ -34,6 +35,10 @@ class SettingsRepository(private val settings: Settings, private val json: Json)
     var wordWrap: Boolean
         get() = settings.getBoolean(Keys.WORD_WRAP, true)
         set(v) = settings.putBoolean(Keys.WORD_WRAP, v)
+
+    var readingMode: Boolean
+        get() = settings.getBoolean(Keys.READING_MODE, false)
+        set(v) = settings.putBoolean(Keys.READING_MODE, v)
 
     var reduceMotion: Boolean
         get() = settings.getBoolean(Keys.REDUCE_MOTION, false)

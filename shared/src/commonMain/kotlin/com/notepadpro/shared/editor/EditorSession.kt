@@ -118,6 +118,16 @@ class EditorSession(
 
     private var disposed = false
 
+    /** Reading is a view preference, not a document edit or an undo entry. */
+    var isReadOnly: Boolean = false
+        private set
+
+    fun setReadOnly(readOnly: Boolean) {
+        if (isReadOnly == readOnly) return
+        flushBurst()
+        isReadOnly = readOnly
+    }
+
     // Only the active row's measured wrap range is needed. Never persist visual
     // line breaks: they change with window width, font size and word wrapping.
     private data class VisualLine(val id: String, val text: String, val range: Caret)
@@ -161,6 +171,11 @@ class EditorSession(
     /** Text/selection change from a row; normalize clipboard line endings first. */
     fun applyTextChange(lineId: String, newText: String, selStart: Int, selEnd: Int) {
         if (disposed) return
+        if (isReadOnly) {
+            val text = _state.value.lines.firstOrNull { it.id == lineId }?.plainText ?: return
+            if (newText == text) moveCaretOnly(lineId, selStart.coerceIn(0, text.length), selEnd.coerceIn(0, text.length))
+            return
+        }
         val text = TextCodec.normalizeLineEndings(newText)
         fun offset(rawOffset: Int): Int = if (text == newText) rawOffset.coerceIn(0, text.length)
             else TextCodec.normalizeLineEndings(newText.take(rawOffset.coerceIn(0, newText.length))).length
@@ -247,6 +262,7 @@ class EditorSession(
     // ------------------------------------------------------------------
 
     fun insertLineBreak(lineId: String) {
+        if (disposed || isReadOnly) return
         val state = _state.value
         val index = state.lines.indexOfFirst { it.id == lineId }
         if (index < 0) return
@@ -270,6 +286,7 @@ class EditorSession(
 
     /** Backspace at start of a line: merge it into the previous line. */
     fun mergeWithPrevious(lineId: String): Boolean {
+        if (disposed || isReadOnly) return false
         val state = _state.value
         val index = state.lines.indexOfFirst { it.id == lineId }
         if (index <= 0) return false
@@ -288,6 +305,7 @@ class EditorSession(
 
     /** Delete at end of a line: merge the following line into it. */
     fun mergeWithNext(lineId: String): Boolean {
+        if (disposed || isReadOnly) return false
         val state = _state.value
         val index = state.lines.indexOfFirst { it.id == lineId }
         if (index < 0 || index >= state.lines.size - 1) return false
@@ -389,6 +407,7 @@ class EditorSession(
     }
 
     private fun mapSelectedLines(mutate: (EditorLine) -> EditorLine) {
+        if (disposed || isReadOnly) return
         val ids = selectedLineIds().toSet()
         if (ids.isEmpty()) return
         flushBurst()
@@ -424,6 +443,7 @@ class EditorSession(
     fun indentLines(delta: Int) = mapSelectedLines { changeIndent(it, delta) }
 
     fun toggleChecked(lineId: String) {
+        if (disposed || isReadOnly) return
         val s = _state.value
         val index = s.lines.indexOfFirst { it.id == lineId }
         if (index < 0) return
@@ -441,6 +461,7 @@ class EditorSession(
     fun clearInlineSelection() = colorTextRange(null, includeParagraphColor = false)
 
     private fun colorTextRange(color: HighlightColor?, includeParagraphColor: Boolean) {
+        if (disposed || isReadOnly) return
         val state = _state.value
         if (state.anchorLineId != null) {
             mapSelectedLines { line ->
@@ -560,6 +581,7 @@ class EditorSession(
     }
 
     fun undo() {
+        if (disposed || isReadOnly) return
         flushBurst()
         val entry = undoStack.removeLastOrNull() ?: return
         val s = _state.value
@@ -577,6 +599,7 @@ class EditorSession(
     }
 
     fun redo() {
+        if (disposed || isReadOnly) return
         val entry = redoStack.removeLastOrNull() ?: return
         val s = _state.value
         when (entry) {
@@ -761,9 +784,14 @@ class EditorSession(
 
     /** Native open dialog; replaces this session's document. */
     suspend fun importFromFile(): Boolean {
+        // A fresh reading tab may load a file; never replace an existing note
+        // while the document is read-only.
+        if (disposed || (isReadOnly && !isPristineUnsaved())) return false
         try {
             val picked = FilePickerBridge.pickOpenFile() ?: return false
+            if (disposed || (isReadOnly && !isPristineUnsaved())) return false
             val raw = withContext(AppDispatchers.io) { picked.readText() }
+            if (disposed || (isReadOnly && !isPristineUnsaved())) return false
             val lineEnding = TextCodec.detectLineEnding(raw)
             val rawLines = TextCodec.normalizeLineEndings(raw).split('\n')
             val lines = rawLines.map { EditorLine.plain(randomLineId(), it) }
@@ -818,6 +846,7 @@ class EditorSession(
     }
 
     fun setLineEnding(lineEnding: LineEnding) {
+        if (disposed || isReadOnly) return
         _state.update { it.copy(version = it.version + 1, lineEnding = lineEnding) }
         markDirty()
     }
@@ -827,6 +856,7 @@ class EditorSession(
      * Pushed through the same snapshot/undo pipeline as regular edits.
      */
     fun replaceAllLinesExternal(newLines: List<EditorLine>) {
+        if (disposed || isReadOnly) return
         flushBurst()
         pushFullSnapshot()
         val s = _state.value

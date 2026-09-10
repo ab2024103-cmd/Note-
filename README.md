@@ -40,9 +40,18 @@ Checksums: [CHECKSUMS.md5](https://github.com/ab2024103-cmd/Note-/releases/downl
   whole-paragraph backgrounds remain an explicit action. Six highlight colors,
   bullet / numbered / checklist lists with indent & outdent; blank pasted separators
   don't restart numbering or gain spurious list markers.
+- **Reading mode** on Android and Windows: a pinned Read/Edit button (or Ctrl+Shift+R)
+  prevents text changes, checklist toggles and replacements while still allowing
+  selection/copy, Find, Extract, zoom and scrolling. The preference survives restarts.
+- **Accurate line counts**: display lines include wrapping at the current width/font;
+  text lines count the original newline-separated rows. All rows are counted, even
+  off-screen ones. Wrapping never inserts line breaks into the saved note.
 - **Floating Find & Replace** palette: draggable, with match count, Match case,
   previous/next, Replace and All. Results update after edits and undo/redo.
-- **Extract by color** panel with copy-to-clipboard output
+- **Extract by color** copies only matching highlighted text, without uncolored
+  neighbouring text from its paragraph. Explicit paragraph backgrounds still
+  extract their colored text; grouping includes every selected color. Copy the
+  extracted snippets from the preview panel.
 - **Autosave** (debounced) into SQLite; plain-text file import/export (Open/Save/Save As)
 - **Status bar**: save state (Ready/Autosaving/Saving/Saved), word count, Ln/Col, zoom
 - **Reduced-motion** setting disables panel slide/fade animations
@@ -55,6 +64,7 @@ Checksums: [CHECKSUMS.md5](https://github.com/ab2024103-cmd/Note-/releases/downl
 | Ctrl+N / Ctrl+O | New note / Open file |
 | Ctrl+S / Ctrl+Shift+S | Save / Save As |
 | Ctrl+F / Ctrl+H | Open Find & Replace (focus Find / Replace with) |
+| Ctrl+Shift+R | Toggle reading mode |
 | Ctrl+B | Toggle sidebar |
 | Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) | Undo / Redo |
 | Ctrl+Shift+8 / 7 / 9 | Bullet / Numbered / Checklist list |
@@ -83,8 +93,8 @@ These tests also run in the Windows CI job before packaging. On headless Linux,
 use `xvfb-run -a ./gradlew :shared:desktopTest` if a display is required.
 
 GitHub Actions (`.github/workflows/build.yml`) builds both targets on every push and
-publishes the artifacts as GitHub Release v1.0.0 only after both platform jobs
-succeed. Build logs and editor test reports are available as Actions artifacts,
+publishes the artifacts as GitHub Release v1.0.0 only after both platform builds
+and the desktop/Android regression tests succeed. Build logs and editor test reports are available as Actions artifacts,
 including for failed runs; CI does not write a separate log branch.
 
 ## App logo and icons
@@ -112,4 +122,19 @@ shared/       Kotlin Multiplatform module: UI, editor engine, notes DB, settings
   desktopMain Desktop actuals (AWT dialogs/clipboard, JDBC SQLite driver)
 androidApp/   Thin Android entry point (single MainActivity)
 desktopApp/   Thin desktop entry point (jpackage configuration)
+```
+
+### Mobile regressions
+
+The UI scenarios in `shared/src/editorUiTest` run on both the desktop JVM and an
+Android API 23 emulator. They cover the 31-text-line paste case, wrapped counts at
+different widths/zoom, exact highlighted extraction, and read-only interaction.
+An Android-specific test checks that entering reading mode hides the editing
+keyboard and touching a note doesn't reopen it. Release publication requires all
+platform builds and both UI-test jobs to pass.
+
+```bash
+./gradlew :shared:desktopTest
+# With an Android emulator or device connected:
+./gradlew :shared:connectedDebugAndroidTest
 ```

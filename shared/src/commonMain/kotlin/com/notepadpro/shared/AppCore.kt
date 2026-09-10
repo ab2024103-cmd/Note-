@@ -38,7 +38,8 @@ data class UiPrefs(
     val fontSizeSp: Float,
     val wordWrap: Boolean,
     val themeMode: ThemeMode,
-    val reduceMotion: Boolean
+    val reduceMotion: Boolean,
+    val readingMode: Boolean = false
 )
 
 /** App-level UI switches (panel visibility etc.). */
@@ -109,7 +110,8 @@ class AppCore(
             fontSizeSp = settings.fontSizeSp,
             wordWrap = settings.wordWrap,
             themeMode = settings.themeMode,
-            reduceMotion = settings.reduceMotion
+            reduceMotion = settings.reduceMotion,
+            readingMode = settings.readingMode
         )
     )
     val prefs: StateFlow<UiPrefs> = _prefs.asStateFlow()
@@ -123,6 +125,13 @@ class AppCore(
     fun setWordWrap(enabled: Boolean) {
         settings.wordWrap = enabled
         _prefs.update { it.copy(wordWrap = enabled) }
+    }
+
+    fun setReadingMode(reading: Boolean) {
+        settings.readingMode = reading
+        _tabs.value.forEach { it.session.setReadOnly(reading) }
+        _prefs.update { it.copy(readingMode = reading) }
+        if (reading) _ui.update { it.copy(replaceMode = false) }
     }
 
     fun setThemeMode(mode: ThemeMode) {
@@ -169,13 +178,14 @@ class AppCore(
         _ui.update { it.copy(findOpen = false, extractOpen = false) }
     }
 
-    private fun openTabInternal(doc: NoteDocument?, activate: Boolean) {
+    private fun openTabInternal(doc: NoteDocument?, activate: Boolean): EditorSession {
         val session = EditorSession(
             scope = scope,
             settings = settings,
             initial = doc,
             onPersist = { d -> store.saveDocument(d) }
         )
+        session.setReadOnly(_prefs.value.readingMode)
         val tab = Tab(localId = nextTabId++, session = session, createdAt = currentTimeMillis())
         _tabs.update { it + tab }
         if (activate) {
@@ -201,6 +211,7 @@ class AppCore(
                 }
             }
         }
+        return session
     }
 
     fun openNote(row: NoteRow) {
@@ -296,7 +307,7 @@ class AppCore(
     fun toggleSidebar() = _ui.update { it.copy(sidebarOpen = !it.sidebarOpen) }
 
     fun setFindOpen(open: Boolean, replaceMode: Boolean = false) {
-        _ui.update { it.copy(findOpen = open, replaceMode = replaceMode,
+        _ui.update { it.copy(findOpen = open, replaceMode = replaceMode && !_prefs.value.readingMode,
             findFocusRequest = if (open) it.findFocusRequest + 1 else it.findFocusRequest) }
         findController.setSession(activeSession)
         findController.setOpen(open)
@@ -349,11 +360,19 @@ class AppCore(
     }
 
     fun requestOpenFile() {
-        val session = activeSession ?: return
+        val reading = _prefs.value.readingMode
+        val previousTab = _activeTabId.value
+        val session = if (reading) openTabInternal(null, activate = true) else activeSession ?: return
         scope.launch {
             if (session.importFromFile()) {
                 refreshNotes()
                 persistTabSession()
+            } else if (reading && session.isPristineUnsaved()) {
+                val tab = _tabs.value.firstOrNull { it.session === session }
+                if (tab != null) {
+                    if (_activeTabId.value == tab.localId && previousTab != null) activateTab(previousTab)
+                    closeTab(tab.localId)
+                }
             }
         }
     }

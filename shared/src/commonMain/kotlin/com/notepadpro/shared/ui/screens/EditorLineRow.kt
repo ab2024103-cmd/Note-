@@ -36,6 +36,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextRange
@@ -147,7 +148,8 @@ internal fun EditorLineRow(
     onSelectLine: (lineId: String) -> Unit,
     onCaretApplied: () -> Unit,
     onVisualLineChanged: (String, Int, Int) -> Unit = { _, _, _ -> },
-    currentFindRange: IntRange? = null
+    currentFindRange: IntRange? = null,
+    readOnly: Boolean = false
 ) {
     val textColor = MaterialTheme.colors.onBackground
     val lineText = line.plainText
@@ -263,15 +265,17 @@ internal fun EditorLineRow(
                     )
                 }
             }
-            .padding(start = 6.dp, end = 8.dp)
+            .padding(start = EditorStartPadding, end = EditorEndPadding)
     ) {
         // -------- list glyph gutter (also the "select line" handle) --------
         Box(
             modifier = Modifier
-                .width((maxOf(36f, ((number?.toString()?.length ?: 1) + 1) * fontSizeSp * 0.65f) + line.indent.coerceAtLeast(0) * 14).dp)
+                .width(editorGutterWidth(line, number, fontSizeSp))
                 .heightIn(min = (fontSizeSp * 1.5f).dp)
-                .pointerInput(line.id) {
+                .testTag("line-gutter-${line.id}")
+                .pointerInput(line.id, line.listType, readOnly) {
                     detectTapGestures { _ ->
+                        if (readOnly) return@detectTapGestures
                         when (line.listType) {
                             ListType.CHECK -> onToggleCheck(line.id)
                             else -> onSelectLine(line.id)
@@ -306,7 +310,8 @@ internal fun EditorLineRow(
         // -------- the editable text --------
         BasicTextField(
             value = tfv,
-            onValueChange = { newValue ->
+            onValueChange = change@{ newValue ->
+                if (readOnly && newValue.text != tfv.text) return@change
                 val selectionOnlyCollapse = newValue.text == tfv.text &&
                     newValue.selection.collapsed && !editingSelection.collapsed
                 if (selectionOnlyCollapse) {
@@ -327,6 +332,7 @@ internal fun EditorLineRow(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
+                .testTag("editor-text-${line.id}")
                 .bringIntoViewRequester(matchIntoView)
                 .focusRequester(focusRequester)
                 .onFocusChanged { f ->
@@ -348,9 +354,10 @@ internal fun EditorLineRow(
                 textLayout = layout
                 reportVisualLine()
             },
+            readOnly = readOnly,
             singleLine = !wordWrap,
             keyboardOptions = KeyboardOptions(autoCorrect = true),
-            cursorBrush = SolidColor(if (isActiveRow) MaterialTheme.colors.primary else textColor)
+            cursorBrush = SolidColor(if (readOnly) Color.Transparent else if (isActiveRow) MaterialTheme.colors.primary else textColor)
         )
     }
 }

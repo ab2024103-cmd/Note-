@@ -79,7 +79,8 @@ internal fun FloatingFindReplacePanel(
     onReplace: () -> Unit,
     onReplaceAll: () -> Unit,
     onClose: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    readOnly: Boolean = false
 ) {
     BoxWithConstraints(modifier.fillMaxSize()) {
         val density = LocalDensity.current
@@ -131,7 +132,7 @@ internal fun FloatingFindReplacePanel(
                         }
                     }
                     Spacer(Modifier.width(6.dp))
-                    Text("Find & Replace", fontSize = 11.sp, color = muted)
+                    Text(if (readOnly) "Find · Reading mode" else "Find & Replace", fontSize = 11.sp, color = muted)
                     Spacer(Modifier.width(10.dp))
                     Divider(Modifier.weight(1f), color = border)
                 }
@@ -142,7 +143,7 @@ internal fun FloatingFindReplacePanel(
                     FindField(
                         value = state.query, placeholder = "Find", label = "Find text",
                         background = fieldBackground, border = border,
-                        focus = !focusReplacement, focusRequest = focusRequest,
+                        focus = readOnly || !focusReplacement, focusRequest = focusRequest,
                         onValue = onQuery, onEnter = onNext, onShiftEnter = onPrevious, onClose = onClose,
                         modifier = Modifier.weight(1f)
                     )
@@ -157,29 +158,31 @@ internal fun FloatingFindReplacePanel(
                     PaletteIcon("↓", "Next match", controls, hasMatches, onNext)
                     PaletteIcon("×", "Close Find & Replace", controls, true, onClose)
                 }
-                Divider(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), color = border)
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    FindField(
-                        value = state.replaceQuery, placeholder = "Replace with", label = "Replacement text",
-                        background = fieldBackground, border = border,
-                        focus = focusReplacement, focusRequest = focusRequest,
-                        onValue = onReplacement, onEnter = onReplace, onShiftEnter = onReplaceAll, onClose = onClose,
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedButton(
-                        onClick = onReplace, enabled = hasMatches,
-                        modifier = Modifier.width(68.dp).height(34.dp),
-                        shape = RoundedCornerShape(7.dp), contentPadding = PaddingValues(4.dp)
-                    ) { Text("Replace", fontSize = 12.sp) }
-                    OutlinedButton(
-                        onClick = onReplaceAll, enabled = hasMatches,
-                        modifier = Modifier.width(42.dp).height(34.dp).semantics { contentDescription = "Replace all" },
-                        shape = RoundedCornerShape(7.dp), contentPadding = PaddingValues(4.dp)
-                    ) { Text("All", fontSize = 12.sp) }
+                if (!readOnly) {
+                    Divider(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), color = border)
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        FindField(
+                            value = state.replaceQuery, placeholder = "Replace with", label = "Replacement text",
+                            background = fieldBackground, border = border,
+                            focus = focusReplacement, focusRequest = focusRequest,
+                            onValue = onReplacement, onEnter = onReplace, onShiftEnter = onReplaceAll, onClose = onClose,
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedButton(
+                            onClick = onReplace, enabled = hasMatches,
+                            modifier = Modifier.width(68.dp).height(34.dp),
+                            shape = RoundedCornerShape(7.dp), contentPadding = PaddingValues(4.dp)
+                        ) { Text("Replace", fontSize = 12.sp) }
+                        OutlinedButton(
+                            onClick = onReplaceAll, enabled = hasMatches,
+                            modifier = Modifier.width(42.dp).height(34.dp).semantics { contentDescription = "Replace all" },
+                            shape = RoundedCornerShape(7.dp), contentPadding = PaddingValues(4.dp)
+                        ) { Text("All", fontSize = 12.sp) }
+                    }
                 }
                 Row(
                     Modifier.fillMaxWidth().padding(start = 10.dp, end = 12.dp, top = 4.dp),
