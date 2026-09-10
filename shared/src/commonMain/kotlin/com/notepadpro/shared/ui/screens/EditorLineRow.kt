@@ -21,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -163,6 +164,12 @@ internal fun EditorLineRow(
     var fieldFocused by remember(line.id) { mutableStateOf(false) }
     var editingSelection by remember(line.id) { mutableStateOf(tfv.selection) }
     var pendingCollapse by remember(line.id) { mutableStateOf<TextRange?>(null) }
+
+    // Recreating a field for a wrap change must not discard keyboard focus.
+    val restoreFocusAfterWrap = remember(wordWrap) { fieldFocused }
+    LaunchedEffect(wordWrap, focusRequester) {
+        if (restoreFocusAfterWrap) focusRequester.requestFocus()
+    }
 
     // Register/unregister this row's FocusRequester.
     DisposableEffect(line.id, focusRequester) {
@@ -308,57 +315,62 @@ internal fun EditorLineRow(
         }
 
         // -------- the editable text --------
-        BasicTextField(
-            value = tfv,
-            onValueChange = change@{ newValue ->
-                if (readOnly && newValue.text != tfv.text) return@change
-                val selectionOnlyCollapse = newValue.text == tfv.text &&
-                    newValue.selection.collapsed && !editingSelection.collapsed
-                if (selectionOnlyCollapse) {
-                    if (fieldFocused) {
-                        tfv = newValue
-                        pendingCollapse = newValue.selection
+        // Compose 1.7's lazy-row restoration can restore a vertical scroller
+        // into a now-horizontal field. Keep each orientation's saved state
+        // separate, while tfv/annotations/selection remain outside this key.
+        key(wordWrap) {
+            BasicTextField(
+                value = tfv,
+                onValueChange = change@{ newValue ->
+                    if (readOnly && newValue.text != tfv.text) return@change
+                    val selectionOnlyCollapse = newValue.text == tfv.text &&
+                        newValue.selection.collapsed && !editingSelection.collapsed
+                    if (selectionOnlyCollapse) {
+                        if (fieldFocused) {
+                            tfv = newValue
+                            pendingCollapse = newValue.selection
+                        } else {
+                            tfv = newValue.copy(selection = editingSelection)
+                        }
                     } else {
-                        tfv = newValue.copy(selection = editingSelection)
-                    }
-                } else {
-                    tfv = newValue
-                    editingSelection = newValue.selection
-                    pendingCollapse = null
-                    onTextChange(line.id, newValue.text, newValue.selection.start, newValue.selection.end)
-                    reportVisualLine()
-                }
-            },
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .testTag("editor-text-${line.id}")
-                .bringIntoViewRequester(matchIntoView)
-                .focusRequester(focusRequester)
-                .onFocusChanged { f ->
-                    fieldFocused = f.isFocused
-                    if (f.isFocused) {
-                        applyCaretIfPending()
-                        onRowFocused(line.id)
-                        reportVisualLine()
-                    } else if (pendingCollapse != null) {
-                        tfv = tfv.copy(selection = editingSelection)
+                        tfv = newValue
+                        editingSelection = newValue.selection
                         pendingCollapse = null
+                        onTextChange(line.id, newValue.text, newValue.selection.start, newValue.selection.end)
+                        reportVisualLine()
                     }
                 },
-            textStyle = TextStyle(
-                fontSize = fontSizeSp.sp,
-                color = textColor
-            ),
-            onTextLayout = { layout ->
-                textLayout = layout
-                reportVisualLine()
-            },
-            readOnly = readOnly,
-            singleLine = !wordWrap,
-            keyboardOptions = KeyboardOptions(autoCorrect = true),
-            cursorBrush = SolidColor(if (readOnly) Color.Transparent else if (isActiveRow) MaterialTheme.colors.primary else textColor)
-        )
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .testTag("editor-text-${line.id}")
+                    .bringIntoViewRequester(matchIntoView)
+                    .focusRequester(focusRequester)
+                    .onFocusChanged { f ->
+                        fieldFocused = f.isFocused
+                        if (f.isFocused) {
+                            applyCaretIfPending()
+                            onRowFocused(line.id)
+                            reportVisualLine()
+                        } else if (pendingCollapse != null) {
+                            tfv = tfv.copy(selection = editingSelection)
+                            pendingCollapse = null
+                        }
+                    },
+                textStyle = TextStyle(
+                    fontSize = fontSizeSp.sp,
+                    color = textColor
+                ),
+                onTextLayout = { layout ->
+                    textLayout = layout
+                    reportVisualLine()
+                },
+                readOnly = readOnly,
+                singleLine = !wordWrap,
+                keyboardOptions = KeyboardOptions(autoCorrect = true),
+                cursorBrush = SolidColor(if (readOnly) Color.Transparent else if (isActiveRow) MaterialTheme.colors.primary else textColor)
+            )
+        }
     }
 }
 

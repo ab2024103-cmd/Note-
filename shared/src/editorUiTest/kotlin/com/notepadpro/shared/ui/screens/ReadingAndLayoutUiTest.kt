@@ -120,6 +120,25 @@ class ReadingAndLayoutUiTest {
     }
 
     @Test
+    fun wrapTogglesKeepFocusSelectionAndTextAcrossRowRecreation() {
+        editor()
+        val start = paragraph.indexOf(selected)
+        val range = TextRange(start, start + selected.length)
+        val field = compose.onNodeWithTag("editor-text-p")
+        field.performClick().performTextInputSelection(range)
+        compose.runOnIdle { wrap = false }
+        compose.waitUntil(10_000) { metrics?.displayLines == 31 }
+        field.assertIsFocused()
+        assertEquals(range, field.fetchSemanticsNode().config[SemanticsProperties.TextSelectionRange])
+        compose.runOnIdle { wrap = true }
+        compose.waitUntil(10_000) { metrics?.displayLines?.let { it > 31 } == true }
+        field.assertIsFocused()
+        assertEquals(range, field.fetchSemanticsNode().config[SemanticsProperties.TextSelectionRange])
+        compose.runOnIdle { assertEquals(pasted, TextCodec.joinLines(session.state.value.lines, LineEnding.LF)) }
+        assertEquals(31 * firstLayout().lineCount, metrics!!.displayLines)
+    }
+
+    @Test
     fun colorMenuDoesNotAddTextOrDisplayLinesAndExtractsOnlyTheSelectedText() {
         editor()
         val before = metrics!!.displayLines
